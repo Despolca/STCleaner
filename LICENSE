@@ -1,0 +1,46 @@
+ST-Cleaner Non-Commercial License (Giấy phép Sử dụng Phi thương mại)
+
+Copyright (c) 2026 lazyboysjh (https://github.com/lazyboysjh/ST-Cleaner)
+All rights reserved. Bảo lưu mọi quyền.
+
+================================================================================
+I. Điều khoản tiếng Việt (Bản gốc tiếng Trung làm chuẩn)
+================================================================================
+
+1. Phạm vi cấp phép (Sử dụng cá nhân và phi thương mại miễn phí)
+Với điều kiện tuân thủ nghiêm ngặt toàn bộ các hạn chế của giấy phép này, chủ sở hữu bản quyền cấp miễn phí cho mọi người dùng cá nhân quyền không độc quyền, không thể chuyển nhượng và có thể thu hồi như sau:
+  (a) Tải xuống, cài đặt và chạy miễn phí phần mềm này (ST-Cleaner) cho mục đích quản lý và chẩn đoán dữ liệu SillyTavern mang tính cá nhân, phi thương mại;
+  (b) Đọc và chỉnh sửa mã nguồn phần mềm này phục vụ mục đích học tập, nghiên cứu cá nhân hoặc tùy biến tự sử dụng;
+  (c) Fork, chia sẻ phần mềm này hoặc gửi đề xuất chỉnh sửa (Pull Request) về kho lưu trữ gốc hoàn toàn miễn phí và không kèm điều kiện thương mại nào, với điều kiện phải giữ nguyên đầy đủ thông báo bản quyền gốc, tên tác giả (lazyboysjh), liên kết kho lưu trữ gốc và toàn văn giấy phép này.
+
+2. Nghiêm cấm mục đích thương mại (Nếu không có văn bản cho phép trước của tác giả, nghiêm cấm mọi hành vi sau)
+  (a) Trực tiếp hoặc gián tiếp mua bán, cho thuê, chuyển nhượng có thu phí phần mềm này, mã nguồn hoặc bất kỳ bản chỉnh sửa, bản phái sinh nào;
+  (b) Đóng gói, cài đặt sẵn hoặc phân phối phần mềm này (hoặc bản chỉnh sửa, bản phái sinh) trong bất kỳ gói tổng hợp thu phí, gói cài sẵn trả phí, image triển khai thương mại, tệp đính kèm khóa học trả phí hoặc sản phẩm giao dịch thương mại điện tử nào (bao gồm nhưng không giới hạn ở Xianyu, Taobao, Pinduoduo, Afdian, Mianbaoduo, Patreon, liên kết lưu trữ đám mây trả phí, v.v.);
+  (c) Cung cấp dịch vụ tải xuống, cài đặt hoặc hỗ trợ kỹ thuật cho phần mềm này dưới bất kỳ hình thức thu phí trực tiếp hoặc trá hình nào như nhóm trả phí, mở khóa bằng tiền thưởng/donate, đặc quyền hội viên, mốc tài trợ, kéo lưu lượng kiếm tiền;
+  (d) Sử dụng, tích hợp hoặc cài đặt sẵn phần mềm này trong bất kỳ dịch vụ SillyTavern đám mây thương mại, nền tảng lưu trữ (SaaS), môi trường cài sẵn cho thuê tài nguyên tính toán hoặc hoạt động kinh doanh doanh nghiệp nào;
+  (e) Xóa bỏ, che giấu hoặc sửa đổi tên tác giả và tuyên bố giấy phép phi thương mại trong mã nguồn, tệp kê khai (manifest.json), giao diện hoặc tài liệu của phần mềm này.
+
+Nếu có nhu cầu cấp phép thương mại hoặc hợp tác, phải liên hệ trước với chủ sở hữu bản quyền (GitHub: @lazyboysjh) và nhận được văn bản cấp phép rõ ràng. Mọi trường hợp vi phạm bất kỳ điều khoản nào nêu trên sẽ khiến quyền sử dụng theo giấy phép này chấm dứt tự động ngay lập tức, và chủ sở hữu bản quyền bảo lưu quyền truy cứu trách nhiệm pháp lý đối với hành vi xâm phạm.
+
+3. Tuyên bố miễn trừ trách nhiệm
+Phần mềm này được cung cấp miễn phí theo nguyên trạng ("AS IS"), không kèm theo bất kỳ bảo đảm minh thị hay ngụ ý nào (bao gồm nhưng không giới hạn ở bảo đảm về khả năng thương mại, sự phù hợp cho một mục đích cụ thể và không xâm phạm quyền). Thao tác dọn dẹp dữ liệu không thể hoàn tác, người dùng được khuyến nghị tự sao lưu dữ liệu quan trọng trước khi thực hiện xóa hàng loạt. Trong mọi trường hợp, tác giả hoặc chủ sở hữu bản quyền không chịu trách nhiệm đối với bất kỳ mất mát dữ liệu, gián đoạn hoạt động hay thiệt hại trực tiếp/gián tiếp nào phát sinh từ việc sử dụng, thao tác nhầm hoặc không thể sử dụng phần mềm này.
+
+================================================================================
+II. English Summary & Terms
+================================================================================
+
+1. Grant of Non-Commercial License
+Subject to the terms and restrictions of this License, the copyright holder grants individuals a free, non-exclusive, non-transferable, revocable license to download, install, use, study, modify, and share this software ("ST-Cleaner") strictly for PERSONAL and NON-COMMERCIAL purposes, provided that the original copyright notice, author attribution ("lazyboysjh"), official repository URL, and this License are preserved in full in all copies or substantial portions of the software.
+
+2. Commercial Use Strictly Prohibited
+Without prior written permission from the copyright holder, you may NOT:
+  (a) Sell, lease, sublicense, or monetize this software or any modified/derivative works directly or indirectly;
+  (b) Bundle, pre-install, or distribute this software in any paid/commercial SillyTavern packages ("paid all-in-one packs"), commercial images, or paid resource bundles;
+  (c) Gate access to this software behind paid memberships, paid chat groups, sponsorships, donations, or monetized links;
+  (d) Use, host, or pre-install this software in any commercial cloud-hosted SillyTavern service, SaaS platform, or business operation;
+  (e) Remove, obscure, or alter any copyright, attribution, or license notices.
+
+Any breach of these restrictions automatically and immediately terminates all rights granted under this License.
+
+3. Disclaimer of Warranty
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DATA LOSS, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

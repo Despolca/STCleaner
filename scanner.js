@@ -1,0 +1,3134 @@
+/**
+ * @file scanner.js
+ * Multi-version SillyTavern data scanner & reference analyzer (ST 1.13.x -> 1.19.x+).
+ * Lazy per-category scanning, shallow-character hydration, strict composite-key whitelist.
+ */
+
+export const SELF_EXTENSION_ID = 'ST-Cleaner';
+export const LEGACY_SELF_EXTENSION_ID = 'delEverything';
+
+/**
+ * 9 top-level categories & sub-group definitions for Bento overview + virtualized list.
+ */
+export const CATEGORY_DEFS = [
+    {
+        id: 'characters',
+        label: 'Nhân vật & Nhóm chat',
+        shortDesc: 'Thẻ nhân vật, gói Sprite biểu cảm và phòng chat nhóm',
+        icon: 'fa-solid fa-users',
+        bootBucketKey: 'characters',
+        subgroups: [
+            { id: 'char_cards', label: 'Thẻ nhân vật' },
+            { id: 'char_sprites', label: 'Sprite biểu cảm nhân vật' },
+            { id: 'groups', label: 'Phòng chat nhóm' },
+        ],
+    },
+    {
+        id: 'chats',
+        label: 'Lịch sử chat',
+        shortDesc: 'Giữ nguyên nhân vật/nhóm, dọn lịch sử theo từng phiên',
+        icon: 'fa-solid fa-comments',
+        bootBucketKey: 'chats_worlds',
+        subgroups: [
+            { id: 'char_chats', label: 'Phiên chat đơn nhân vật' },
+            { id: 'group_chats', label: 'Phiên chat nhóm' },
+        ],
+    },
+    {
+        id: 'regex',
+        label: 'Regex & Script',
+        shortDesc: 'Regex script, script TavernHelper và biến toàn cục bền vững',
+        icon: 'fa-solid fa-code',
+        bootBucketKey: null,
+        subgroups: [
+            { id: 'regex_global', label: 'Regex toàn cục' },
+            { id: 'regex_scoped', label: 'Regex cục bộ nhân vật' },
+            { id: 'regex_preset', label: 'Regex nhúng trong Preset' },
+            { id: 'regex_combos', label: 'Bộ tổ hợp Regex' },
+            { id: 'th_global', label: 'Script toàn cục TavernHelper' },
+            { id: 'th_char', label: 'Script nhân vật TavernHelper' },
+            { id: 'th_preset', label: 'Script Preset TavernHelper' },
+            { id: 'global_vars', label: 'Biến script toàn cục ST' },
+        ],
+    },
+    {
+        id: 'worldinfo',
+        label: 'Worldbook',
+        shortDesc: 'Worldbook độc lập đã gắn/nhàn rỗi và Worldbook nhúng trong nhân vật',
+        icon: 'fa-solid fa-book-atlas',
+        bootBucketKey: null,
+        subgroups: [
+            { id: 'wi_unbound', label: 'Worldbook nhàn rỗi chưa gắn' },
+            { id: 'wi_bound', label: 'Worldbook độc lập đã gắn' },
+            { id: 'wi_embedded', label: 'Worldbook nhúng trong nhân vật' },
+        ],
+    },
+    {
+        id: 'presets',
+        label: 'Preset & Template',
+        shortDesc: 'Preset Chat/Text Completion và mẫu Instruct/Context/SysPrompt/Reasoning',
+        icon: 'fa-solid fa-sliders',
+        bootBucketKey: 'settings',
+        subgroups: [
+            { id: 'preset_openai', label: 'Preset Chat Completion' },
+            { id: 'preset_textgen', label: 'Preset Text Completion' },
+            { id: 'preset_instruct', label: 'Mẫu Instruct' },
+            { id: 'preset_context', label: 'Mẫu Context' },
+            { id: 'preset_sysprompt', label: 'System Prompt' },
+            { id: 'preset_reasoning', label: 'Mẫu Reasoning' },
+            { id: 'preset_novel', label: 'Preset NovelAI' },
+            { id: 'preset_kobold', label: 'Preset KoboldAI' },
+        ],
+    },
+    {
+        id: 'profiles',
+        label: 'Cấu hình API',
+        shortDesc: 'Hồ sơ kết nối API (không đụng tới tệp khóa secrets.json)',
+        icon: 'fa-solid fa-plug',
+        bootBucketKey: null,
+        subgroups: [
+            { id: 'conn_profiles', label: 'Hồ sơ kết nối API' },
+        ],
+    },
+    {
+        id: 'personas',
+        label: 'Persona & Giao diện',
+        shortDesc: 'Avatar Persona người dùng, hình nền chat và giao diện tùy chỉnh',
+        icon: 'fa-solid fa-masks-theater',
+        bootBucketKey: 'backgrounds',
+        subgroups: [
+            { id: 'user_personas', label: 'Persona người dùng' },
+            { id: 'backgrounds', label: 'Hình nền' },
+            { id: 'themes', label: 'Giao diện tùy chỉnh' },
+        ],
+    },
+    {
+        id: 'media',
+        label: 'Media & Tài nguyên',
+        shortDesc: 'Quick Reply, Data Bank, thư viện ảnh, âm thanh, workflow và thẻ tag',
+        icon: 'fa-solid fa-photo-film',
+        bootBucketKey: null,
+        subgroups: [
+            { id: 'quick_replies', label: 'Bộ Quick Reply' },
+            { id: 'databank', label: 'Tệp đính kèm Data Bank' },
+            { id: 'gallery_images', label: 'Thư viện ảnh & Ảnh chat' },
+            { id: 'user_assets', label: 'Tài nguyên âm thanh & Môi trường' },
+            { id: 'comfy_workflows', label: 'Workflow tạo ảnh ComfyUI' },
+            { id: 'tags', label: 'Thẻ tag nhân vật' },
+        ],
+    },
+    {
+        id: 'extensions',
+        label: 'Tiện ích & Sao lưu',
+        shortDesc: 'Tiện ích bên thứ ba, Vector Cache, sao lưu chat và tệp mồ côi',
+        icon: 'fa-solid fa-puzzle-piece',
+        bootBucketKey: 'extensions',
+        subgroups: [
+            { id: 'third_party_ext', label: 'Tiện ích bên thứ ba' },
+            { id: 'vectors', label: 'Tập hợp Vector Cache' },
+            { id: 'chat_backups', label: 'Tệp sao lưu chat' },
+            { id: 'data_maid', label: 'Tệp mồ côi dư thừa' },
+        ],
+    },
+];
+
+export const HARD_PROTECTED_BACKGROUNDS = new Set([
+    '__transparent.png',
+]);
+
+export const OFFICIAL_BUILTIN_THEMES = new Set([
+    'Dark Lite',
+    'Cappuccino',
+    'Celestial Macaron',
+    'Dark V 1.0',
+    'Azure',
+]);
+
+export const OFFICIAL_BUILTIN_BACKGROUNDS = new Set([
+    '__transparent.png',
+    '_black.jpg',
+    '_white.jpg',
+    'bedroom clean.jpg',
+    'bedroom cyberpunk.jpg',
+    'bedroom red.jpg',
+    'bedroom tatami.jpg',
+    'cityscape medieval market.jpg',
+    'cityscape medieval night.jpg',
+    'cityscape postapoc.jpg',
+    'forest treehouse fireworks air baloons (by kallmeflocc).jpg',
+    'japan classroom side.jpg',
+    'japan classroom.jpg',
+    'japan path cherry blossom.jpg',
+    'japan university.jpg',
+    'landscape autumn great tree.jpg',
+    'landscape beach day.png',
+    'landscape beach night.jpg',
+    'landscape mountain lake.jpg',
+    'landscape postapoc.jpg',
+    'landscape winter lake house.jpg',
+    'royal.jpg',
+    'tavern day.jpg',
+]);
+
+export const OFFICIAL_BUILTIN_PRESET_NAMES = new Set([
+    'Default', 'Blank', 'Deterministic', 'Neutral', 'RecoveredRuins',
+    'Universal-Creative', 'Universal-Light', 'Universal-Super-Creative',
+    'Asper-Kayra', 'Blended-Coffee-Kayra', 'Blook-Kayra', 'Carefree-Kayra',
+    'CosmicCube-Kayra', 'Edgewise-Clio', 'Fresh-Coffee-Clio', 'Fresh-Coffee-Kayra',
+    'Green-Active-Writer-Kayra', 'Keelback-Clio', 'Long-Press-Clio', 'Pilotfish-Kayra',
+    'Pro_Writer-Kayra', 'Stelenes-Kayra', 'Talker-Chat-Clio', 'Tea_Time-Kayra',
+    'Tesseract-Kayra', 'Vingt-Un-Clio', 'Writers-Daemon-Kayra', 'Erato-Dragonfruit',
+    'Erato-Golden Arrow', 'Erato-Shosetsu', 'Erato-Wilder', 'Erato-Zany Scribe',
+    'Adventure', 'Alpaca-Single-Turn', 'Alpaca', 'ChatML', 'ChatML-Names',
+    'Libra-32B', 'Lightning 1.1', 'Llama 2 Chat', 'Llama 3 Instruct', 'Llama 4 Instruct',
+    'Llama-3-Instruct-Names', 'Minimalist', 'NovelAI', 'OldDefault', 'Metharme',
+    'Story', 'Synthia', 'simple-proxy-for-tavern', 'Command R', 'Phi', 'Tulu',
+    'Koala', 'OpenOrca-OpenChat', 'Vicuna 1.0', 'Vicuna 1.1', 'WizardLM-13B',
+    'WizardLM', 'KoboldAI', 'Gemma 2', 'Gemma 4', 'Mistral V1', 'Mistral V2 & V3',
+    'Mistral V3-Tekken', 'Mistral V7', 'Mistral V7-Tekken', 'DeepSeek-V2.5', 'DeepSeek',
+    'GLM-4', 'Dots1', 'Moonshot AI', 'OpenAI Harmony', 'OpenAI Harmony (Thinking)',
+    'Think XML', 'Actor', 'Assistant - Expert', 'Assistant - Simple', 'Chain of Thought',
+    'Roleplay - Detailed', 'Roleplay - Immersive', 'Roleplay - Simple', 'Text Adventure',
+    'Writer - Creative', 'Writer - Realistic', 'Neutral - Chat',
+]);
+
+export const CORE_ECOSYSTEM_EXT_PATTERNS = [
+    { match: /js-slash-runner|tavern[-_]?helper|酒馆助手/i, label: 'Nền tảng cốt lõi TavernHelper' },
+    { match: /st-prompt-template|prompt[-_]?template/i, label: 'Nền tảng cốt lõi Prompt Template' },
+    { match: /littlewhitebox|xiaobaix|小白/i, label: 'Nền tảng hiển thị LittleWhiteBox' },
+    { match: /memory[-_]?books/i, label: 'Tiện ích cốt lõi tóm tắt MemoryBooks' },
+];
+
+export function matchCoreEcosystemExt(extName) {
+    const s = String(extName || '');
+    for (const entry of CORE_ECOSYSTEM_EXT_PATTERNS) {
+        if (entry.match.test(s)) return entry.label;
+    }
+    return '';
+}
+
+let cachedHostModulesPromise = null;
+
+/**
+ * Lazily imports SillyTavern's live frontend ES modules (`world-info.js`, `personas.js`, `script.js`)
+ * when running inside a real SillyTavern browser tab so live unexported state (`selected_world_info`,
+ * `world_info`, `user_avatar`, `saveSettings`, `getCharacters`, `updateWorldInfoList`) stays 100% synced.
+ * Gracefully resolves to `{}` in standalone Node test environments.
+ */
+export function loadHostModules() {
+    if (cachedHostModulesPromise) return cachedHostModulesPromise;
+    cachedHostModulesPromise = (async () => {
+        const mods = { worldInfo: null, personas: null, script: null };
+        if (typeof window === 'undefined') return mods;
+        const tryImport = async (rel) => {
+            try {
+                return await import(new URL(rel, import.meta.url).href);
+            } catch {
+                return null;
+            }
+        };
+        const [wi, per, scr] = await Promise.all([
+            tryImport('../../../world-info.js'),
+            tryImport('../../../personas.js'),
+            tryImport('../../../../script.js'),
+        ]);
+        mods.worldInfo = wi;
+        mods.personas = per;
+        mods.script = scr;
+        return mods;
+    })();
+    return cachedHostModulesPromise;
+}
+
+/**
+ * Resolves the runtime extension folder name from import.meta.url so self-exclusion
+ * works even if the user cloned into a custom directory name.
+ * @param {string} [metaUrl]
+ * @returns {string}
+ */
+export function resolveSelfFolderName(metaUrl = import.meta.url) {
+    try {
+        const clean = String(metaUrl || '').split('?')[0].split('#')[0];
+        const parts = clean.split('/').filter(Boolean);
+        // Expected .../scripts/extensions/third-party/<folderName>/scanner.js
+        if (parts.length >= 2) {
+            return decodeURIComponent(parts[parts.length - 2]);
+        }
+    } catch {
+        // Fallback below
+    }
+    return SELF_EXTENSION_ID;
+}
+
+/**
+ * Exact cyrb53 hash matching SillyTavern's getStringHash in public/scripts/utils.js.
+ * @param {string} str
+ * @param {number} [seed=0]
+ * @returns {number}
+ */
+export function computeStringHash(str, seed = 0) {
+    if (typeof str !== 'string') return 0;
+    let h1 = 0xdeadbeef ^ seed;
+    let h2 = 0x41c6ce57 ^ seed;
+    for (let i = 0; i < str.length; i++) {
+        const ch = str.charCodeAt(i);
+        h1 = Math.imul(h1 ^ ch, 2654435761);
+        h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return 4294967296 * (2097151 & h2) + (h1 >>> 0);
+}
+
+/**
+ * Strips .jsonl / .png suffix for display or file_id matching.
+ * @param {string} filename
+ * @param {string} ext
+ * @returns {string}
+ */
+export function stripExt(filename, ext) {
+    const s = String(filename || '');
+    return s.toLowerCase().endsWith(ext.toLowerCase()) ? s.slice(0, -ext.length) : s;
+}
+
+/**
+ * Parses `api/backgrounds/all` across ST 1.13.x (string[]), intermediate object[],
+ * and ST 1.17+/1.19+ (`{ images: [{ filename, isAnimated }], config }`).
+ * @param {any} payload
+ * @returns {{ filename: string, isAnimated: boolean }[]}
+ */
+export function parseBackgroundsPayload(payload) {
+    if (!payload) return [];
+    const rawList = Array.isArray(payload)
+        ? payload
+        : (Array.isArray(payload.images) ? payload.images : []);
+
+    const out = [];
+    const seen = new Set();
+    for (const entry of rawList) {
+        let filename = '';
+        let isAnimated = false;
+        if (typeof entry === 'string') {
+            filename = entry.trim();
+        } else if (entry && typeof entry === 'object') {
+            filename = String(entry.filename ?? entry.name ?? entry.bg ?? '').trim();
+            isAnimated = Boolean(entry.isAnimated);
+        }
+        if (!filename || HARD_PROTECTED_BACKGROUNDS.has(filename) || seen.has(filename)) continue;
+        seen.add(filename);
+        out.push({ filename, isAnimated });
+    }
+    return out;
+}
+
+const MONTH_MAP = {
+    jan: 0, january: 0,
+    feb: 1, february: 1,
+    mar: 2, march: 2,
+    apr: 3, april: 3,
+    may: 4,
+    jun: 5, june: 5,
+    jul: 6, july: 6,
+    aug: 7, august: 7,
+    sep: 8, sept: 8, september: 8,
+    oct: 9, october: 9,
+    nov: 10, november: 10,
+    dec: 11, december: 11,
+};
+
+/**
+ * Parses SillyTavern's varied timestamp formats into epoch milliseconds (or 0 if unavailable):
+ * - numeric ms / s (`1732190000000` / `1732190000`) or Date instances
+ * - ISO 8601 with `Z` or timezone offsets (`"2026-11-20T20:05:00.123+08:00"`)
+ * - ST humanized strings with or without spaces & ms (`"2024-6-5 @14h 56m 50s 682ms"`, `"2024-07-12@01h31m37s123ms"`)
+ * - Legacy TavernAI meridiem strings (`"June 19, 2023 2:20pm"`, `"Nov 5, 2024 11:05am"`)
+ * - Filename date prefixes/suffixes (`"2026-11-20@TarotClub.jsonl"`, `"chat_klein_20261119_120000.jsonl"`)
+ * @param {any} raw
+ * @param {string} [fallbackText]
+ * @returns {number}
+ */
+export function parseTavernTimestamp(raw, fallbackText = '') {
+    if (raw instanceof Date) {
+        const t = raw.getTime();
+        return Number.isFinite(t) && t > 0 ? Math.round(t) : 0;
+    }
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
+        return raw < 1e11 ? Math.round(raw * 1000) : Math.round(raw);
+    }
+    const candidates = [];
+    if (raw !== undefined && raw !== null && raw !== '') candidates.push(String(raw).trim());
+    if (fallbackText) candidates.push(String(fallbackText).trim());
+
+    for (const str of candidates) {
+        if (!str) continue;
+        if (/^\d{10,13}$/.test(str)) {
+            const n = Number(str);
+            return str.length === 10 ? n * 1000 : n;
+        }
+        // 1. Full ISO-8601 with explicit Z or +/-HH:MM offset (preserve exact timezone offset!)
+        if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/i.test(str)) {
+            const isoMs = Date.parse(str);
+            if (Number.isFinite(isoMs) && isoMs > 0) return isoMs;
+        }
+        // 2. ST humanized & YYYY-MM-DD formats (including spaces after h/m/s and optional ms: `2024-6-5 @14h 56m 50s 682ms`)
+        const stMatch = str.match(
+            /(\d{4})-(\d{1,2})-(\d{1,2})(?:[\s@T_-]+(\d{1,2})\s*[h:]\s*(\d{1,2})(?:\s*[m:]\s*(\d{1,2})(?:\s*s?\s*(\d{1,3})\s*ms|\s*s)?)?)?/i,
+        );
+        if (stMatch) {
+            const y = Number(stMatch[1]);
+            const m = Number(stMatch[2]) - 1;
+            const d = Number(stMatch[3]);
+            const hh = Number(stMatch[4] || 0);
+            const mm = Number(stMatch[5] || 0);
+            const ss = Number(stMatch[6] || 0);
+            const ms = Number(stMatch[7] || 0);
+            const ts = Date.UTC(y, m, d, hh, mm, ss, ms);
+            if (Number.isFinite(ts) && ts > 0) return ts;
+        }
+        // 3. Legacy TavernAI / ST meridiem format (`"June 19, 2023 2:20pm"` without space before am/pm)
+        const merMatch = str.match(/([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)/i);
+        if (merMatch) {
+            const monIdx = MONTH_MAP[merMatch[1].toLowerCase()];
+            if (monIdx !== undefined) {
+                const day = Number(merMatch[2]);
+                const year = Number(merMatch[3]);
+                const rawHour = Number(merMatch[4]) % 12;
+                const hour24 = merMatch[7].toLowerCase() === 'pm' ? rawHour + 12 : rawHour;
+                const min = Number(merMatch[5]);
+                const sec = Number(merMatch[6] || 0);
+                const ts = Date.UTC(year, monIdx, day, hour24, min, sec);
+                if (Number.isFinite(ts) && ts > 0) return ts;
+            }
+        }
+        // 4. Compact YYYYMMDD (e.g. backup filename `chat_name_20261119_120000.jsonl`)
+        const compactMatch = str.match(/(?:^|[^\d])(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?:[_-]?(\d{2})(\d{2})(\d{2})?)?/);
+        if (compactMatch) {
+            const ts = Date.UTC(
+                Number(compactMatch[1]),
+                Number(compactMatch[2]) - 1,
+                Number(compactMatch[3]),
+                Number(compactMatch[4] || 0),
+                Number(compactMatch[5] || 0),
+                Number(compactMatch[6] || 0),
+            );
+            if (Number.isFinite(ts) && ts > 0) return ts;
+        }
+        const parsed = Date.parse(str);
+        if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+    return 0;
+}
+
+/**
+ * Parses human-readable file size strings like `"14.2 KB"`, `"1.5 MiB"`, `"1,024 B"` into bytes.
+ * @param {any} raw
+ * @returns {number}
+ */
+export function parseSizeStringBytes(raw) {
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0) return Math.round(raw);
+    const s = String(raw || '').replace(/,/g, '').trim();
+    if (!s) return 0;
+    const m = s.match(/^([\d.]+)\s*(b|kb|kib|mb|mib|gb|gib)?$/i);
+    if (!m) return 0;
+    const val = Number(m[1]);
+    if (!Number.isFinite(val)) return 0;
+    const unit = (m[2] || 'b').toLowerCase();
+    if (unit === 'gb' || unit === 'gib') return Math.round(val * 1024 * 1024 * 1024);
+    if (unit === 'mb' || unit === 'mib') return Math.round(val * 1024 * 1024);
+    if (unit === 'kb' || unit === 'kib') return Math.round(val * 1024);
+    return Math.round(val);
+}
+
+export function formatShortDate(ms) {
+    const n = Number(ms) || 0;
+    if (n <= 0) return '';
+    try {
+        const d = new Date(n);
+        if (Number.isNaN(d.getTime())) return '';
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+    } catch {
+        return '';
+    }
+}
+
+/**
+ * Bounded concurrency worker helper with AbortSignal support.
+ * @template T, R
+ * @param {T[]} items
+ * @param {number} concurrency
+ * @param {(item: T, index: number) => Promise<R>} worker
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<R[]>}
+ */
+export async function mapWithConcurrency(items, concurrency, worker, signal) {
+    const list = Array.isArray(items) ? items : [];
+    if (list.length === 0) return [];
+    const results = new Array(list.length);
+    const limit = Math.max(1, Math.min(concurrency || 4, list.length));
+    let cursor = 0;
+
+    async function next() {
+        while (cursor < list.length) {
+            if (signal?.aborted) {
+                throw new DOMException('Scan aborted', 'AbortError');
+            }
+            const idx = cursor++;
+            results[idx] = await worker(list[idx], idx);
+        }
+    }
+
+    const runners = [];
+    for (let i = 0; i < limit; i++) {
+        runners.push(next());
+    }
+    await Promise.all(runners);
+    return results;
+}
+
+/**
+ * Extracts normalized `{ name, data }` pairs from ST's two preset collection styles:
+ * 1) Indexed array + `{ [name]: index }` map (`openai_settings` + `openai_setting_names`)
+ * 2) Array of `{ name, ... }` objects (`instruct`, `context`, `sysprompt`, `reasoning`)
+ * @param {any} settingsArr
+ * @param {any} namesMapOrArr
+ * @returns {{ name: string, data: any }[]}
+ */
+export function parseMaybeJsonObject(val) {
+    if (!val) return {};
+    if (typeof val === 'object') return val;
+    if (typeof val === 'string') {
+        try {
+            const parsed = JSON.parse(val);
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch {
+            return {};
+        }
+    }
+    return {};
+}
+
+export function extractNamedPresets(settingsArr, namesMapOrArr) {
+    const out = [];
+    const seen = new Set();
+
+    if (namesMapOrArr && typeof namesMapOrArr === 'object' && !Array.isArray(namesMapOrArr)) {
+        for (const [name, idx] of Object.entries(namesMapOrArr)) {
+            if (!name || name === 'gui' || seen.has(name)) continue;
+            seen.add(name);
+            const rawData = Array.isArray(settingsArr) ? settingsArr[Number(idx)] : undefined;
+            out.push({ name, data: parseMaybeJsonObject(rawData) });
+        }
+        return out;
+    }
+
+    if (Array.isArray(namesMapOrArr)) {
+        for (let i = 0; i < namesMapOrArr.length; i++) {
+            const entry = namesMapOrArr[i];
+            const name = typeof entry === 'string' ? entry : entry?.name;
+            if (!name || name === 'gui' || seen.has(name)) continue;
+            seen.add(name);
+            const rawData = typeof entry === 'object'
+                ? entry
+                : (Array.isArray(settingsArr) ? settingsArr[i] : {});
+            out.push({ name, data: parseMaybeJsonObject(rawData) });
+        }
+        return out;
+    }
+
+    if (Array.isArray(settingsArr)) {
+        for (const entry of settingsArr) {
+            const parsedEntry = typeof entry === 'string' ? parseMaybeJsonObject(entry) : entry;
+            const name = typeof entry === 'string' ? parsedEntry?.name : entry?.name;
+            if (!name || name === 'gui' || seen.has(name)) continue;
+            seen.add(name);
+            out.push({ name, data: typeof parsedEntry === 'object' && parsedEntry ? parsedEntry : {} });
+        }
+    }
+    return out;
+}
+
+export function countNamedPresetsFast(settingsArr, namesMapOrArr) {
+    const seen = new Set();
+    if (namesMapOrArr && typeof namesMapOrArr === 'object' && !Array.isArray(namesMapOrArr)) {
+        for (const name of Object.keys(namesMapOrArr)) {
+            if (name && name !== 'gui') seen.add(name);
+        }
+        return seen.size;
+    }
+    if (Array.isArray(namesMapOrArr)) {
+        for (let i = 0; i < namesMapOrArr.length; i++) {
+            const entry = namesMapOrArr[i];
+            const name = typeof entry === 'string'
+                ? (namesMapOrArr === settingsArr && entry.trim().startsWith('{') ? parseMaybeJsonObject(entry)?.name : entry)
+                : entry?.name;
+            if (name && name !== 'gui') seen.add(name);
+        }
+        return seen.size;
+    }
+    if (Array.isArray(settingsArr)) {
+        for (let i = 0; i < settingsArr.length; i++) {
+            const entry = settingsArr[i];
+            const name = typeof entry === 'string' ? parseMaybeJsonObject(entry)?.name : entry?.name;
+            if (name && name !== 'gui') seen.add(name);
+        }
+    }
+    return seen.size;
+}
+
+function getCachedNamedPresets(settingsData, cacheKey, settingsArr, namesMapOrArr) {
+    if (!settingsData || typeof settingsData !== 'object') {
+        return extractNamedPresets(settingsArr, namesMapOrArr);
+    }
+    if (!settingsData.__presetCache) {
+        Object.defineProperty(settingsData, '__presetCache', {
+            value: new Map(),
+            enumerable: false,
+            configurable: true,
+        });
+    }
+    if (settingsData.__presetCache.has(cacheKey)) {
+        return settingsData.__presetCache.get(cacheKey);
+    }
+    const parsed = extractNamedPresets(settingsArr, namesMapOrArr);
+    settingsData.__presetCache.set(cacheKey, parsed);
+    return parsed;
+}
+
+export const BUILTIN_COMFY_WORKFLOWS = new Set([
+    'Default_Comfy_Workflow.json',
+    'Char_Avatar_Comfy_Workflow.json',
+]);
+
+/**
+ * Extracts flattened TavernHelper / JS-Slash-Runner scripts from both v4 (`ScriptTree[]`
+ * with `{ type: 'script' | 'folder', scripts }`) and v3 legacy (`{ type: 'script' | 'folder', value }`).
+ * @param {any} treeArr
+ * @returns {Array<{ id: string, name: string, enabled: boolean, info: string, folderName: string, folderEnabled: boolean }>}
+ */
+export function extractTavernHelperScripts(treeArr) {
+    if (!Array.isArray(treeArr)) return [];
+    const results = [];
+    for (let i = 0; i < treeArr.length; i++) {
+        const node = treeArr[i];
+        if (!node || typeof node !== 'object') continue;
+
+        if (node.type === 'folder') {
+            const folderObj = (node.value && !Array.isArray(node.value) && typeof node.value === 'object')
+                ? node.value
+                : node;
+            const folderName = String(folderObj.name || node.name || 'Thư mục script');
+            const folderEnabled = (folderObj.enabled ?? node.enabled) !== false;
+            const rawScriptsField = node.scripts ?? (Array.isArray(node.value) ? node.value : folderObj.scripts);
+            const children = Array.isArray(rawScriptsField)
+                ? rawScriptsField
+                : (rawScriptsField && typeof rawScriptsField === 'object'
+                    ? Object.entries(rawScriptsField).map(([k, v]) => (v && typeof v === 'object' ? { id: v.id ?? k, ...v } : null))
+                    : []);
+            for (let k = 0; k < children.length; k++) {
+                const rawChild = children[k]?.type === 'script' && children[k]?.value ? children[k].value : children[k];
+                if (!rawChild || typeof rawChild !== 'object') continue;
+                results.push({
+                    id: String(rawChild.id ?? `th_f_${i}_${k}`),
+                    name: String(rawChild.name || `Script chưa đặt tên #${k + 1}`),
+                    enabled: Boolean(rawChild.enabled),
+                    info: String(rawChild.info || ''),
+                    folderName,
+                    folderEnabled,
+                });
+            }
+            continue;
+        }
+
+        const rawScript = node.type === 'script' && node.value && typeof node.value === 'object'
+            ? node.value
+            : node;
+        results.push({
+            id: String(rawScript.id ?? `th_${i}`),
+            name: String(rawScript.name || `Script chưa đặt tên #${i + 1}`),
+            enabled: Boolean(rawScript.enabled),
+            info: String(rawScript.info || ''),
+            folderName: '',
+            folderEnabled: true,
+        });
+    }
+    return results;
+}
+
+/**
+ * Removes scripts whose IDs are in `removeIdSet` from a v4 or v3 TavernHelper ScriptTree array
+ * without destroying remaining folder scripts or unrelated scripts.
+ * @param {any[]} treeArr
+ * @param {Set<string>} removeIdSet
+ * @returns {any[]}
+ */
+export function pruneTavernHelperTree(treeArr, removeIdSet) {
+    if (!Array.isArray(treeArr) || !removeIdSet || removeIdSet.size === 0) {
+        return Array.isArray(treeArr) ? treeArr : [];
+    }
+    const nextTree = [];
+    for (let i = 0; i < treeArr.length; i++) {
+        const node = treeArr[i];
+        if (!node || typeof node !== 'object') continue;
+
+        if (node.type === 'folder') {
+            const filterChildren = (arr) => arr.filter((child, k) => {
+                const raw = child?.type === 'script' && child?.value ? child.value : child;
+                const sid = String(raw?.id ?? `th_f_${i}_${k}`);
+                return !removeIdSet.has(sid);
+            });
+
+            if (Array.isArray(node.scripts)) {
+                const kept = filterChildren(node.scripts);
+                if (kept.length > 0 || node.scripts.length === 0) {
+                    nextTree.push({ ...node, scripts: kept });
+                }
+            } else if (Array.isArray(node.value)) {
+                const kept = filterChildren(node.value);
+                if (kept.length > 0 || node.value.length === 0) {
+                    nextTree.push({ ...node, value: kept });
+                }
+            } else if (node.value && typeof node.value === 'object' && Array.isArray(node.value.scripts)) {
+                const kept = filterChildren(node.value.scripts);
+                if (kept.length > 0 || node.value.scripts.length === 0) {
+                    nextTree.push({ ...node, value: { ...node.value, scripts: kept } });
+                }
+            } else if (node.value && typeof node.value === 'object' && node.value.scripts && typeof node.value.scripts === 'object') {
+                const nextMap = {};
+                const origEntries = Object.entries(node.value.scripts);
+                for (const [k, val] of origEntries) {
+                    const sid = String(val?.id ?? k);
+                    if (!removeIdSet.has(sid)) {
+                        nextMap[k] = val;
+                    }
+                }
+                if (Object.keys(nextMap).length > 0 || origEntries.length === 0) {
+                    nextTree.push({ ...node, value: { ...node.value, scripts: nextMap } });
+                }
+            } else if (node.scripts && typeof node.scripts === 'object' && !Array.isArray(node.scripts)) {
+                const nextMap = {};
+                const origEntries = Object.entries(node.scripts);
+                for (const [k, val] of origEntries) {
+                    const sid = String(val?.id ?? k);
+                    if (!removeIdSet.has(sid)) {
+                        nextMap[k] = val;
+                    }
+                }
+                if (Object.keys(nextMap).length > 0 || origEntries.length === 0) {
+                    nextTree.push({ ...node, scripts: nextMap });
+                }
+            } else {
+                nextTree.push(node);
+            }
+            continue;
+        }
+
+        const rawScript = node.type === 'script' && node.value && typeof node.value === 'object'
+            ? node.value
+            : node;
+        const sid = String(rawScript?.id ?? `th_${i}`);
+        if (!removeIdSet.has(sid)) {
+            nextTree.push(node);
+        }
+    }
+    return nextTree;
+}
+
+/**
+ * Creates a stateful scanner session scoped to one modal lifecycle.
+ * Calling `dispose()` releases all item caches and whitelists (`0 MB` idle memory).
+ *
+ * @param {object} [options]
+ * @param {() => any} [options.getContext]
+ * @param {typeof fetch} [options.fetchFn]
+ * @param {string} [options.selfFolderName]
+ * @param {() => boolean} [options.isAdminFn]
+ */
+export function createScannerSession(options = {}) {
+    const getContext = options.getContext || (() => globalThis.SillyTavern?.getContext?.() || {});
+    const fetchFn = options.fetchFn || ((...args) => globalThis.fetch(...args));
+    const runtimeFolder = options.selfFolderName || resolveSelfFolderName();
+    const excludedExtNames = new Set([
+        SELF_EXTENSION_ID.toLowerCase(),
+        LEGACY_SELF_EXTENSION_ID.toLowerCase(),
+        String(runtimeFolder || '').toLowerCase(),
+    ]);
+
+    /** @type {Map<string, any>} Master composite-key whitelist consumed by deleter.js */
+    const whitelistMap = new Map();
+    /** @type {Map<string, { categoryId: string, groups: any[], totalCount: number, activeCount: number, scannedAt: number, warnings: string[] }>} */
+    const categoryCache = new Map();
+
+    let settingsSnapshot = null;
+    let settingsPromise = null;
+    let overviewSummaryCache = null;
+    let unshallowDone = false;
+    let dataMaidToken = null;
+    let dataMaidAvailable = null;
+    const requestTimeoutMs = Number(options.requestTimeoutMs) > 0 ? Number(options.requestTimeoutMs) : 15000;
+
+    function createThrottledProgress(onProgress, intervalMs = 60) {
+        if (typeof onProgress !== 'function') return null;
+        let lastTs = 0;
+        return (msg, forceFlush = false) => {
+            const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+            if (forceFlush || now - lastTs >= intervalMs) {
+                lastTs = now;
+                onProgress(msg);
+            }
+        };
+    }
+
+    function getHeaders(ctx) {
+        try {
+            if (typeof ctx?.getRequestHeaders === 'function') {
+                return ctx.getRequestHeaders();
+            }
+        } catch {
+            // Fallback below
+        }
+        return { 'Content-Type': 'application/json' };
+    }
+
+    async function apiJson(url, { method = 'POST', body, signal, allow404 = false } = {}) {
+        if (signal?.aborted) {
+            throw new DOMException('Scan aborted', 'AbortError');
+        }
+        const ctx = getContext();
+        const headers = { ...getHeaders(ctx) };
+        const controller = new AbortController();
+        let timedOut = false;
+        const onExternalAbort = () => controller.abort();
+        if (signal) {
+            signal.addEventListener('abort', onExternalAbort, { once: true });
+        }
+        const timer = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+        }, requestTimeoutMs);
+
+        try {
+            const init = { method, headers, signal: controller.signal };
+            if (method !== 'GET' && method !== 'HEAD') {
+                init.body = JSON.stringify(body ?? {});
+            } else {
+                delete headers['Content-Type'];
+            }
+            const res = await fetchFn(url, init);
+            if (allow404 && res.status === 404) {
+                return { __notFound: true, status: 404 };
+            }
+            if (!res.ok) {
+                const err = new Error(`HTTP ${res.status} on ${url}`);
+                err.status = res.status;
+                throw err;
+            }
+            const text = await res.text();
+            if (!text) return null;
+            try {
+                return JSON.parse(text);
+            } catch {
+                return text;
+            }
+        } catch (err) {
+            if (signal?.aborted) {
+                throw new DOMException('Scan aborted', 'AbortError');
+            }
+            if (timedOut) {
+                const timeoutErr = new Error(`Hết thời gian chờ yêu cầu (${requestTimeoutMs}ms): ${url}`);
+                timeoutErr.code = 'ETIMEDOUT';
+                throw timeoutErr;
+            }
+            throw err;
+        } finally {
+            clearTimeout(timer);
+            if (signal) {
+                signal.removeEventListener('abort', onExternalAbort);
+            }
+        }
+    }
+
+    async function getSettingsSnapshot(signal, force = false) {
+        if (signal?.aborted) {
+            throw new DOMException('Scan aborted', 'AbortError');
+        }
+        if (settingsSnapshot && !force) return settingsSnapshot;
+        if (!settingsPromise || force) {
+            // Do not tie shared session metadata promise to one transient tab signal,
+            // and never cache `{}` on transient failure so subsequent scans can retry cleanly.
+            settingsPromise = apiJson('api/settings/get', { method: 'POST', body: {} })
+                .then((data) => {
+                    const normalized = data && typeof data === 'object' ? { ...data } : {};
+                    if (typeof normalized.settings === 'string') {
+                        normalized.settings = parseMaybeJsonObject(normalized.settings);
+                    }
+                    settingsSnapshot = normalized;
+                    overviewSummaryCache = null;
+                    settingsPromise = null;
+                    return settingsSnapshot;
+                })
+                .catch(() => {
+                    settingsPromise = null;
+                    return {};
+                });
+        }
+        const res = await settingsPromise;
+        if (signal?.aborted) {
+            throw new DOMException('Scan aborted', 'AbortError');
+        }
+        return res;
+    }
+
+    function checkIsAdmin(ctx, settingsData) {
+        if (typeof options.isAdminFn === 'function') {
+            return Boolean(options.isAdminFn());
+        }
+        if (ctx?.currentUser && typeof ctx.currentUser.admin === 'boolean') {
+            return ctx.currentUser.admin;
+        }
+        if (settingsData && settingsData.enable_accounts === false) {
+            return true;
+        }
+        // Single-user default mode in SillyTavern has no multi-account restriction
+        if (!ctx?.currentUser) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Hydrates lazy-loaded (`shallow === true`) characters in ST 1.19+ so embedded
+     * regex scripts, character_book, and bound worldbooks are never missed.
+     */
+    async function ensureCharactersUnshallowed(signal, onProgress) {
+        const ctx = getContext();
+        const characters = Array.isArray(ctx?.characters) ? ctx.characters : [];
+        if (unshallowDone) return characters;
+
+        const shallowIndexes = [];
+        for (let i = 0; i < characters.length; i++) {
+            if (characters[i]?.shallow === true && characters[i]?.avatar) {
+                shallowIndexes.push(i);
+            }
+        }
+
+        if (shallowIndexes.length > 0) {
+            let done = 0;
+            const emitProg = createThrottledProgress(onProgress, 60);
+            await mapWithConcurrency(shallowIndexes, 4, async (charIdx) => {
+                const charObj = characters[charIdx];
+                if (!charObj || !charObj.shallow) return;
+                try {
+                    if (typeof ctx.unshallowCharacter === 'function') {
+                        await ctx.unshallowCharacter(charIdx);
+                    } else {
+                        const fullChar = await apiJson('api/characters/get', {
+                            method: 'POST',
+                            body: { avatar_url: charObj.avatar },
+                            signal,
+                        });
+                        if (fullChar && typeof fullChar === 'object') {
+                            Object.assign(charObj, fullChar);
+                            charObj.shallow = false;
+                        }
+                    }
+                } catch (err) {
+                    if (err?.name === 'AbortError' || signal?.aborted) {
+                        throw new DOMException('Scan aborted', 'AbortError');
+                    }
+                    // Keep existing partial entry rather than aborting entire scan
+                }
+                done++;
+                emitProg?.(`Đang nạp bổ sung dữ liệu thẻ nhân vật Lazy Load (${done}/${shallowIndexes.length})...`, done === shallowIndexes.length);
+            }, signal);
+            overviewSummaryCache = null;
+        }
+
+        if (!signal?.aborted) {
+            unshallowDone = true;
+        }
+        return characters;
+    }
+
+    let scanOrderCounter = 0;
+
+    function registerItem(item) {
+        const sizeBytes = Math.max(0, Number(item.sizeBytes) || 0);
+        const normalized = {
+            ...item,
+            sizeBytes,
+            sortTimeMs: Math.max(0, Number(item.sortTimeMs) || 0),
+            sortMetric: Number.isFinite(Number(item.sortMetric)) ? Number(item.sortMetric) : sizeBytes,
+            scanOrder: scanOrderCounter++,
+            isCritical: Boolean(item.isCritical),
+            criticalReason: String(item.criticalReason || ''),
+            isCaution: Boolean(item.isCaution),
+            facets: Array.isArray(item.facets) ? item.facets : [],
+        };
+        whitelistMap.set(normalized.key, normalized);
+        return normalized;
+    }
+
+    function unregisterCategoryKeys(categoryId) {
+        for (const [key, item] of whitelistMap.entries()) {
+            if (item.categoryId === categoryId) {
+                whitelistMap.delete(key);
+            }
+        }
+    }
+
+    /**
+     * Collects all worldbook binding relationships across global, characters, personas, and active chat.
+     */
+    function collectWorldInfoBindings(ctx, hostMods) {
+        /** @type {Map<string, { labels: string[], scopes: Set<string>, tagIds: Set<any> }>} */
+        const bindings = new Map();
+        const tagMap = ctx?.tagMap || ctx?.tag_map || {};
+
+        const addBinding = (worldName, label, scope, charAvatar = '') => {
+            const name = String(worldName || '').trim();
+            if (!name) return;
+            let rec = bindings.get(name);
+            if (!rec) {
+                rec = { labels: [], scopes: new Set(), tagIds: new Set() };
+                bindings.set(name, rec);
+            }
+            if (!rec.labels.includes(label)) {
+                rec.labels.push(label);
+            }
+            if (scope) {
+                rec.scopes.add(scope);
+            }
+            if (charAvatar && Array.isArray(tagMap[charAvatar])) {
+                for (const tid of tagMap[charAvatar]) {
+                    rec.tagIds.add(tid);
+                }
+            }
+        };
+
+        const globalWorlds = hostMods?.worldInfo?.selected_world_info
+            || ctx?.worldInfo?.globalSelect
+            || ctx?.selected_world_info
+            || settingsSnapshot?.settings?.world_info?.globalSelect
+            || [];
+        if (Array.isArray(globalWorlds)) {
+            for (const w of globalWorlds) {
+                addBinding(w, 'Bật toàn cục', 'wi:global');
+            }
+        }
+
+        const characters = Array.isArray(ctx?.characters) ? ctx.characters : [];
+        const charAvatarByName = new Map();
+        for (const ch of characters) {
+            if (ch?.name && ch?.avatar) charAvatarByName.set(ch.name, ch.avatar);
+            if (ch?.avatar) charAvatarByName.set(stripExt(ch.avatar, '.png'), ch.avatar);
+            const primary = ch?.data?.extensions?.world;
+            if (primary) {
+                addBinding(primary, `Worldbook chính: ${ch.name || ch.avatar}`, 'wi:char_primary', ch.avatar || '');
+            }
+        }
+
+        const charLore = hostMods?.worldInfo?.world_info?.charLore
+            || ctx?.worldInfo?.charLore
+            || ctx?.world_info?.charLore
+            || settingsSnapshot?.settings?.world_info?.charLore
+            || [];
+        if (Array.isArray(charLore)) {
+            for (const entry of charLore) {
+                const targetName = entry?.name || 'Phụ trợ nhân vật';
+                const linkedAvatar = charAvatarByName.get(targetName) || '';
+                const books = Array.isArray(entry?.extraBooks) ? entry.extraBooks : [];
+                for (const b of books) {
+                    addBinding(b, `Phụ trợ nhân vật: ${targetName}`, 'wi:char_extra', linkedAvatar);
+                }
+            }
+        }
+
+        const powerUser = ctx?.powerUserSettings || ctx?.power_user || {};
+        if (powerUser.persona_description_lorebook) {
+            addBinding(powerUser.persona_description_lorebook, 'Worldbook Persona hiện tại', 'wi:persona_chat');
+        }
+        if (powerUser.persona_descriptions && typeof powerUser.persona_descriptions === 'object') {
+            for (const [avatar, desc] of Object.entries(powerUser.persona_descriptions)) {
+                if (desc?.lorebook) {
+                    const pName = powerUser.personas?.[avatar] || avatar;
+                    addBinding(desc.lorebook, `Persona: ${pName}`, 'wi:persona_chat');
+                }
+            }
+        }
+
+        const chatMeta = ctx?.chatMetadata || ctx?.chat_metadata || {};
+        if (chatMeta?.world_info) {
+            addBinding(chatMeta.world_info, 'Worldbook phiên chat hiện tại', 'wi:persona_chat');
+        }
+
+        return bindings;
+    }
+
+    /**
+     * Fast synchronous + cached overview counts for the 9 Bento Grid tiles.
+     * Never blocks UI rendering or triggers heavy chat directory scans.
+     */
+    function getOverviewSummary() {
+        const ctx = getContext();
+        const characters = Array.isArray(ctx?.characters) ? ctx.characters : [];
+        const groups = Array.isArray(ctx?.groups) ? ctx.groups : [];
+        const cacheKeySig = `${characters.length}:${groups.length}:${categoryCache.size}:${Boolean(settingsSnapshot)}`;
+        if (overviewSummaryCache && overviewSummaryCache.__sig === cacheKeySig) {
+            return overviewSummaryCache;
+        }
+
+        const extSettings = ctx?.extensionSettings || ctx?.extension_settings || {};
+        const powerUser = ctx?.powerUserSettings || ctx?.power_user || {};
+
+        const summary = {};
+        Object.defineProperty(summary, '__sig', { value: cacheKeySig, enumerable: false });
+        for (const def of CATEGORY_DEFS) {
+            const cached = categoryCache.get(def.id);
+            if (cached) {
+                summary[def.id] = {
+                    count: cached.totalCount,
+                    activeCount: cached.activeCount,
+                    scanned: true,
+                    badgeText: `${cached.totalCount} mục`,
+                };
+                continue;
+            }
+
+            let approx = null;
+            switch (def.id) {
+                case 'characters':
+                    approx = characters.length + groups.length;
+                    break;
+                case 'regex': {
+                    const globalCount = Array.isArray(extSettings.regex) ? extSettings.regex.length : 0;
+                    const comboCount = Array.isArray(extSettings.regex_presets) ? extSettings.regex_presets.length : 0;
+                    const thGlobalTree = [
+                        ...(Array.isArray(extSettings?.tavern_helper?.script?.scripts) ? extSettings.tavern_helper.script.scripts : []),
+                        ...(Array.isArray(extSettings?.TavernHelper?.script?.scriptsRepository) ? extSettings.TavernHelper.script.scriptsRepository : []),
+                    ];
+                    const thGlobalCount = extractTavernHelperScripts(thGlobalTree).length;
+                    const gvarCount = extSettings?.variables?.global && typeof extSettings.variables.global === 'object'
+                        ? Object.keys(extSettings.variables.global).length
+                        : 0;
+                    let scopedCount = 0;
+                    for (const c of characters) {
+                        const arr = c?.data?.extensions?.regex_scripts;
+                        if (Array.isArray(arr)) scopedCount += arr.length;
+                        const thChar = c?.data?.extensions?.tavern_helper?.scripts || c?.data?.extensions?.TavernHelper_scripts;
+                        if (Array.isArray(thChar)) scopedCount += extractTavernHelperScripts(thChar).length;
+                    }
+                    approx = globalCount + comboCount + thGlobalCount + gvarCount + scopedCount;
+                    break;
+                }
+                case 'worldinfo': {
+                    const worldNames = Array.isArray(ctx?.worldNames)
+                        ? ctx.worldNames
+                        : (Array.isArray(settingsSnapshot?.world_names) ? settingsSnapshot.world_names : null);
+                    let embedded = 0;
+                    for (const c of characters) {
+                        if (c?.data?.character_book?.entries?.length || (c?.data?.character_book && Object.keys(c.data.character_book).length > 0)) {
+                            embedded++;
+                        }
+                    }
+                    if (worldNames) approx = worldNames.length + embedded;
+                    break;
+                }
+                case 'presets': {
+                    if (settingsSnapshot) {
+                        const oai = countNamedPresetsFast(settingsSnapshot.openai_settings, settingsSnapshot.openai_setting_names);
+                        const tgw = countNamedPresetsFast(settingsSnapshot.textgenerationwebui_presets, settingsSnapshot.textgenerationwebui_preset_names);
+                        const ins = countNamedPresetsFast(settingsSnapshot.instruct, settingsSnapshot.instruct);
+                        const cxt = countNamedPresetsFast(settingsSnapshot.context, settingsSnapshot.context);
+                        const sys = countNamedPresetsFast(settingsSnapshot.sysprompt, settingsSnapshot.sysprompt);
+                        const rsn = countNamedPresetsFast(settingsSnapshot.reasoning, settingsSnapshot.reasoning);
+                        const nai = countNamedPresetsFast(settingsSnapshot.novelai_settings, settingsSnapshot.novelai_setting_names);
+                        const kob = countNamedPresetsFast(settingsSnapshot.koboldai_settings, settingsSnapshot.koboldai_setting_names);
+                        approx = oai + tgw + ins + cxt + sys + rsn + nai + kob;
+                    }
+                    break;
+                }
+                case 'profiles': {
+                    const profiles = extSettings?.connectionManager?.profiles;
+                    approx = Array.isArray(profiles) ? profiles.length : 0;
+                    break;
+                }
+                case 'personas': {
+                    const personaKeys = powerUser?.personas ? Object.keys(powerUser.personas).length : 0;
+                    const themeCount = Array.isArray(settingsSnapshot?.themes) ? settingsSnapshot.themes.length : 0;
+                    if (personaKeys > 0 || themeCount > 0) {
+                        approx = personaKeys + themeCount;
+                    }
+                    break;
+                }
+                case 'media': {
+                    const tags = Array.isArray(ctx?.tags) ? ctx.tags.length : 0;
+                    const globalDb = Array.isArray(extSettings?.attachments) ? extSettings.attachments.length : 0;
+                    const qrCount = Array.isArray(settingsSnapshot?.quickReplyPresets) ? settingsSnapshot.quickReplyPresets.length : 0;
+                    if (tags + globalDb + qrCount > 0) {
+                        approx = tags + globalDb + qrCount;
+                    }
+                    break;
+                }
+                default:
+                    approx = null;
+            }
+
+            summary[def.id] = {
+                count: approx,
+                activeCount: 0,
+                scanned: false,
+                badgeText: approx !== null ? `${approx}${def.id === 'personas' || def.id === 'media' || def.id === 'regex' ? '+' : ''} mục` : 'Nhấn để quét',
+            };
+        }
+        overviewSummaryCache = summary;
+        return summary;
+    }
+
+    // =========================================================================
+    // Category Scanners (1 - 9)
+    // =========================================================================
+
+    async function scanCharactersCategory(signal, onProgress, onPartialGroups) {
+        const ctx = getContext();
+        const characters = Array.isArray(ctx?.characters) ? ctx.characters : [];
+        const groups = Array.isArray(ctx?.groups) ? ctx.groups : [];
+        const activeCharIndex = ctx?.characterId !== undefined && ctx?.characterId !== null && ctx?.characterId !== ''
+            ? Number(ctx.characterId)
+            : -1;
+        const activeCharAvatar = activeCharIndex >= 0 ? characters[activeCharIndex]?.avatar : null;
+        const activeGroupId = ctx?.groupId ?? ctx?.selected_group ?? null;
+        const tagMap = ctx?.tagMap || ctx?.tag_map || {};
+        const tagsById = new Map(
+            (Array.isArray(ctx?.tags) ? ctx.tags : [])
+                .filter(t => t && t.id !== undefined && t.id !== null)
+                .map(t => [t.id, t.name]),
+        );
+
+        // O(G) pre-indexed group membership counter instead of O(C * G * M)
+        const groupCountByAvatar = new Map();
+        for (const g of groups) {
+            if (!Array.isArray(g?.members)) continue;
+            for (const memberAvatar of g.members) {
+                if (memberAvatar) {
+                    groupCountByAvatar.set(memberAvatar, (groupCountByAvatar.get(memberAvatar) || 0) + 1);
+                }
+            }
+        }
+
+        const charItems = [];
+        for (const ch of characters) {
+            if (!ch?.avatar) continue;
+            const groupRefCount = groupCountByAvatar.get(ch.avatar) || 0;
+            const rawTagIds = Array.isArray(tagMap[ch.avatar]) ? tagMap[ch.avatar] : [];
+            const validTagIds = rawTagIds.filter(id => tagsById.has(id));
+            const tagLabels = validTagIds.map(id => tagsById.get(id)).filter(Boolean);
+            const worldName = ch?.data?.extensions?.world || '';
+            const scopedRegexCount = Array.isArray(ch?.data?.extensions?.regex_scripts) ? ch.data.extensions.regex_scripts.length : 0;
+            const isFav = Boolean(ch.fav === true || ch.fav === 'true' || ch?.data?.extensions?.fav === true);
+            const isBuiltin = ch.avatar === 'default_Seraphina.png';
+            const sortTimeMs = parseTavernTimestamp(
+                ch.date_last_chat || ch.date_added || ch.create_date,
+                ch.chat || '',
+            );
+            const dateLabel = formatShortDate(sortTimeMs);
+            const chatSizeBytes = Number(ch.chat_size) || Number(ch.data_size) || 0;
+
+            const subtitleParts = [ch.avatar];
+            if (dateLabel) subtitleParts.push(`Tương tác: ${dateLabel}`);
+            if (worldName) subtitleParts.push(`Worldbook: ${worldName}`);
+            if (scopedRegexCount > 0) subtitleParts.push(`Regex cục bộ: ${scopedRegexCount}`);
+            if (tagLabels.length > 2) subtitleParts.push(`Thêm tag: ${tagLabels.slice(2, 5).join('/')}`);
+
+            const isActive = ch.avatar === activeCharAvatar;
+            const facets = [isBuiltin ? 'src:builtin' : 'src:user'];
+            if (isFav) facets.push('char:fav');
+            if (groupRefCount > 0) facets.push('char:ingroup');
+            if (!isActive && !isFav && groupRefCount === 0) facets.push('char:idle');
+            if (validTagIds.length > 0) {
+                for (const tid of validTagIds) facets.push(`tag:${tid}`);
+            } else {
+                facets.push('tag:__untagged__');
+            }
+
+            charItems.push(registerItem({
+                key: `char_card:${ch.avatar}`,
+                categoryId: 'characters',
+                subgroupId: 'char_cards',
+                title: String(ch.name || stripExt(ch.avatar, '.png')),
+                subtitle: subtitleParts.join(' · '),
+                sizeBytes: chatSizeBytes,
+                sortTimeMs,
+                sortMetric: chatSizeBytes || (groupRefCount + scopedRegexCount),
+                isActive,
+                isCaution: isFav,
+                facets,
+                badges: [
+                    ...(isActive ? [{ text: 'Đang dùng', type: 'active' }] : []),
+                    ...(isFav ? [{ text: '★ Yêu thích', type: 'fav' }] : []),
+                    ...(isBuiltin ? [{ text: 'Mặc định ST', type: 'builtin' }] : []),
+                    ...(groupRefCount > 0 ? [{ text: `Thành viên nhóm×${groupRefCount}`, type: 'info' }] : []),
+                    ...tagLabels.slice(0, 2).map(t => ({ text: `#${t}`, type: 'tag' })),
+                    ...(tagLabels.length > 2 ? [{ text: `+${tagLabels.length - 2}`, type: 'muted' }] : []),
+                ],
+                payload: {
+                    kind: 'char_card',
+                    avatar: ch.avatar,
+                    name: String(ch.name || stripExt(ch.avatar, '.png')),
+                    spriteDirName: stripExt(ch.avatar, '.png'),
+                },
+            }));
+        }
+
+        const groupItems = [];
+        for (const g of groups) {
+            if (!g?.id) continue;
+            const memberCount = Array.isArray(g.members) ? g.members.length : 0;
+            const chatCount = Array.isArray(g.chats) ? g.chats.length : 0;
+            const isActive = String(g.id) === String(activeGroupId);
+            const isFav = Boolean(g.fav === true || g.fav === 'true');
+            groupItems.push(registerItem({
+                key: `group:${g.id}`,
+                categoryId: 'characters',
+                subgroupId: 'groups',
+                title: String(g.name || `Nhóm chat ${g.id}`),
+                subtitle: `ID: ${g.id} · ${memberCount} thành viên · ${chatCount} phiên chat`,
+                sizeBytes: 0,
+                sortTimeMs: parseTavernTimestamp(g.date_last_chat || g.date_added, g.chat_id || ''),
+                sortMetric: chatCount * 10 + memberCount,
+                isActive,
+                isCaution: isFav,
+                facets: ['src:user', ...(isFav ? ['char:fav'] : [])],
+                badges: [
+                    ...(isActive ? [{ text: 'Đang dùng', type: 'active' }] : []),
+                    ...(isFav ? [{ text: '★ Yêu thích', type: 'fav' }] : []),
+                    { text: `${chatCount} phiên`, type: 'muted' },
+                ],
+                payload: {
+                    kind: 'group',
+                    id: g.id,
+                    name: String(g.name || g.id),
+                },
+            }));
+        }
+
+        // Instant <2ms First-Paint: stream in-memory character cards & groups immediately before network sprite checks!
+        if (typeof onPartialGroups === 'function' && (charItems.length > 0 || groupItems.length > 0)) {
+            onPartialGroups([
+                { id: 'char_cards', label: 'Thẻ nhân vật', items: charItems },
+                { id: 'char_sprites', label: 'Sprite biểu cảm nhân vật', items: [] },
+                { id: 'groups', label: 'Phòng chat nhóm', items: groupItems },
+            ]);
+        }
+
+        // 2. Standalone Character Expression Sprite Packs (`GET api/sprites/get?name=<dir>`)
+        const spritePackItems = [];
+        let checkedSprites = 0;
+        const emitSpriteProg = createThrottledProgress(onProgress, 60);
+        await mapWithConcurrency(characters, 5, async (ch) => {
+            if (!ch?.avatar) return;
+            const spriteDirName = stripExt(ch.avatar, '.png');
+            if (!spriteDirName) return;
+            try {
+                const spList = await apiJson(`api/sprites/get?name=${encodeURIComponent(spriteDirName)}`, {
+                    method: 'GET',
+                    signal,
+                    allow404: true,
+                });
+                if (!Array.isArray(spList) || spList.length === 0) return;
+                const parsedSprites = spList
+                    .map(sp => {
+                        const rawFile = String(sp?.path || '').split('?')[0].split('/').pop() || '';
+                        const spriteName = rawFile.replace(/\.[^.]+$/, '');
+                        return { label: String(sp?.label || ''), spriteName };
+                    })
+                    .filter(s => s.label && s.spriteName);
+                if (parsedSprites.length === 0) return;
+
+                const isActive = ch.avatar === activeCharAvatar;
+                const rawTagIds = Array.isArray(tagMap[ch.avatar]) ? tagMap[ch.avatar] : [];
+                const validTagIds = rawTagIds.filter(id => tagsById.has(id));
+                const spFacets = ['src:user'];
+                for (const tid of validTagIds) spFacets.push(`tag:${tid}`);
+
+                const sampleLabels = parsedSprites.slice(0, 5).map(s => s.label).join(', ');
+                spritePackItems.push(registerItem({
+                    key: `char_sprites:${ch.avatar}`,
+                    categoryId: 'characters',
+                    subgroupId: 'char_sprites',
+                    title: `${ch.name || spriteDirName} — Gói Sprite biểu cảm riêng`,
+                    subtitle: `Tổng ${parsedSprites.length} ảnh biểu cảm (${sampleLabels}${parsedSprites.length > 5 ? '...' : ''}) · Chỉ xóa Sprite, giữ lại thẻ nhân vật`,
+                    sizeBytes: 0,
+                    sortTimeMs: parseTavernTimestamp(ch.date_last_chat || ch.date_added || ch.create_date),
+                    sortMetric: parsedSprites.length,
+                    isActive,
+                    facets: spFacets,
+                    badges: [
+                        ...(isActive ? [{ text: 'Đang dùng', type: 'active' }] : []),
+                        { text: `${parsedSprites.length} ảnh Sprite`, type: 'muted' },
+                    ],
+                    payload: {
+                        kind: 'char_sprites',
+                        avatar: ch.avatar,
+                        spriteDirName,
+                        sprites: parsedSprites,
+                    },
+                }));
+            } catch {
+                // Non-fatal if sprites endpoint unavailable
+            } finally {
+                checkedSprites++;
+                if (characters.length >= 12) {
+                    emitSpriteProg?.(`Đang kiểm tra ngầm gói Sprite nhân vật (${checkedSprites}/${characters.length})...`, checkedSprites === characters.length);
+                }
+            }
+        }, signal);
+
+        if (signal?.aborted) throw new DOMException('Scan aborted', 'AbortError');
+        return [
+            { id: 'char_cards', label: 'Thẻ nhân vật', items: charItems },
+            { id: 'char_sprites', label: 'Sprite biểu cảm nhân vật', items: spritePackItems },
+            { id: 'groups', label: 'Phòng chat nhóm', items: groupItems },
+        ];
+    }
+
+    async function scanChatsCategory(signal, onProgress, onPartialGroups) {
+        const ctx = getContext();
+        const characters = Array.isArray(ctx?.characters) ? ctx.characters : [];
+        const groups = Array.isArray(ctx?.groups) ? ctx.groups : [];
+        const activeCharIndex = ctx?.characterId !== undefined && ctx?.characterId !== null && ctx?.characterId !== ''
+            ? Number(ctx.characterId)
+            : -1;
+        const activeChar = activeCharIndex >= 0 ? characters[activeCharIndex] : null;
+        const activeGroupId = ctx?.groupId ?? ctx?.selected_group ?? null;
+        const tagMap = ctx?.tagMap || ctx?.tag_map || {};
+        const validTagIdSet = new Set(
+            (Array.isArray(ctx?.tags) ? ctx.tags : [])
+                .filter(t => t && t.id !== undefined && t.id !== null)
+                .map(t => t.id),
+        );
+
+        const groupChatItems = [];
+        for (const g of groups) {
+            if (!g?.id || !Array.isArray(g.chats)) continue;
+            const isGroupSelected = String(g.id) === String(activeGroupId);
+            for (const chatId of g.chats) {
+                const cid = String(chatId || '').trim();
+                if (!cid) continue;
+                const isGroupDefault = String(g.chat_id) === cid;
+                const isActive = isGroupSelected && isGroupDefault;
+                const gChatTimeMs = parseTavernTimestamp(cid);
+                const gChatDate = formatShortDate(gChatTimeMs);
+                groupChatItems.push(registerItem({
+                    key: `group_chat:${g.id}::${cid}`,
+                    categoryId: 'chats',
+                    subgroupId: 'group_chats',
+                    title: `${g.name || g.id} — ${cid}`,
+                    subtitle: `${gChatDate ? `Ghi nhận: ${gChatDate} · ` : ''}Chỉ dọn phiên này (giữ lại phòng chat nhóm)`,
+                    sizeBytes: 0,
+                    sortTimeMs: gChatTimeMs,
+                    isActive,
+                    facets: [isGroupDefault ? 'chat:current_default' : 'chat:branch'],
+                    badges: [
+                        ...(isActive
+                            ? [{ text: 'Đang dùng', type: 'active' }]
+                            : (isGroupDefault ? [{ text: 'Phiên chính nhóm', type: 'info' }] : [{ text: 'Nhánh lịch sử', type: 'muted' }])),
+                    ],
+                    payload: {
+                        kind: 'group_chat',
+                        groupId: g.id,
+                        groupName: g.name || String(g.id),
+                        chatId: cid,
+                    },
+                }));
+            }
+        }
+
+        const charChatItems = [];
+        let scannedChars = 0;
+        const emitProg = createThrottledProgress(onProgress, 60);
+        let lastPartialTs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+
+        if (typeof onPartialGroups === 'function' && groupChatItems.length > 0) {
+            onPartialGroups([
+                { id: 'char_chats', label: 'Phiên chat đơn nhân vật', items: [] },
+                { id: 'group_chats', label: 'Phiên chat nhóm', items: groupChatItems },
+            ]);
+        }
+
+        await mapWithConcurrency(characters, 6, async (ch) => {
+            if (!ch?.avatar) return;
+            try {
+                const list = await apiJson('api/characters/chats', {
+                    method: 'POST',
+                    body: { avatar_url: ch.avatar },
+                    signal,
+                });
+                if (Array.isArray(list)) {
+                    const activeChatBase = activeChar?.avatar === ch.avatar ? stripExt(activeChar?.chat || '', '.jsonl') : '';
+                    const charDefaultBase = stripExt(ch?.chat || '', '.jsonl');
+                    const charTagIds = (Array.isArray(tagMap[ch.avatar]) ? tagMap[ch.avatar] : []).filter(id => validTagIdSet.has(id));
+                    for (const info of list) {
+                        const fileName = String(info?.file_name || '').trim();
+                        if (!fileName) continue;
+                        const baseName = stripExt(fileName, '.jsonl');
+                        const isActive = Boolean(activeChatBase && baseName === activeChatBase);
+                        const isCharDefault = Boolean(charDefaultBase && baseName === charDefaultBase);
+                        const msgCount = info?.chat_items ?? info?.mes_count ?? '';
+                        const numericMsgs = msgCount !== '' ? Number(msgCount) : NaN;
+                        const isShortTest = !isCharDefault && Number.isFinite(numericMsgs) && numericMsgs <= 2;
+
+                        const chatFacets = [isCharDefault ? 'chat:current_default' : 'chat:branch'];
+                        if (isShortTest) chatFacets.push('chat:short_test');
+                        for (const tid of charTagIds) chatFacets.push(`tag:${tid}`);
+
+                        const parsedBytes = parseSizeStringBytes(info?.file_size);
+                        const sortTimeMs = parseTavernTimestamp(info?.last_mes, fileName);
+
+                        const chatMetaParts = [
+                            msgCount !== '' ? `${msgCount} tin nhắn` : 'Phiên chat đơn',
+                            info?.file_size ? String(info.file_size) : '',
+                            info?.last_mes ? `Gần nhất: ${String(info.last_mes).slice(0, 24)}` : '',
+                        ].filter(Boolean);
+
+                        charChatItems.push(registerItem({
+                            key: `char_chat:${ch.avatar}::${fileName}`,
+                            categoryId: 'chats',
+                            subgroupId: 'char_chats',
+                            title: `${ch.name || stripExt(ch.avatar, '.png')} — ${baseName}`,
+                            subtitle: chatMetaParts.join(' · '),
+                            sizeBytes: parsedBytes,
+                            sortTimeMs,
+                            sortMetric: Number.isFinite(numericMsgs) ? numericMsgs * 1024 + parsedBytes : parsedBytes,
+                            isActive,
+                            facets: chatFacets,
+                            badges: [
+                                ...(isActive
+                                    ? [{ text: 'Đang dùng', type: 'active' }]
+                                    : (isCharDefault ? [{ text: 'Phiên chính NV', type: 'info' }] : [{ text: 'Nhánh lịch sử', type: 'muted' }])),
+                                ...(isShortTest ? [{ text: 'Bản thử ngắn', type: 'warn' }] : []),
+                            ],
+                            payload: {
+                                kind: 'char_chat',
+                                avatar: ch.avatar,
+                                characterName: ch.name || stripExt(ch.avatar, '.png'),
+                                fileName,
+                                fileId: baseName,
+                            },
+                        }));
+                    }
+                }
+            } catch {
+                // Character with no chat directory or error is safely skipped
+            }
+            scannedChars++;
+            emitProg?.(`Đang quét phiên chat của nhân vật (${scannedChars}/${characters.length})...`, scannedChars === characters.length);
+            if (typeof onPartialGroups === 'function' && charChatItems.length > 0 && scannedChars < characters.length) {
+                const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+                if (now - lastPartialTs >= 140) {
+                    lastPartialTs = now;
+                    onPartialGroups([
+                        { id: 'char_chats', label: 'Phiên chat đơn nhân vật', items: charChatItems.slice() },
+                        { id: 'group_chats', label: 'Phiên chat nhóm', items: groupChatItems },
+                    ]);
+                }
+            }
+        }, signal);
+
+        return [
+            { id: 'char_chats', label: 'Phiên chat đơn nhân vật', items: charChatItems },
+            { id: 'group_chats', label: 'Phiên chat nhóm', items: groupChatItems },
+        ];
+    }
+
+    async function scanRegexCategory(signal, onProgress) {
+        await ensureCharactersUnshallowed(signal, onProgress);
+        const settingsData = await getSettingsSnapshot(signal);
+        const ctx = getContext();
+        const extSettings = ctx?.extensionSettings || ctx?.extension_settings || {};
+        const characters = Array.isArray(ctx?.characters) ? ctx.characters : [];
+        const activeCharIndex = ctx?.characterId !== undefined && ctx?.characterId !== null && ctx?.characterId !== ''
+            ? Number(ctx.characterId)
+            : -1;
+        const activeCharAvatar = activeCharIndex >= 0 ? characters[activeCharIndex]?.avatar : null;
+
+        // 1. Global regex scripts
+        const globalItems = [];
+        const globalList = Array.isArray(extSettings.regex) ? extSettings.regex : [];
+        for (let i = 0; i < globalList.length; i++) {
+            const script = globalList[i];
+            if (!script) continue;
+            const scriptId = String(script.id ?? `idx_${i}`);
+            const disabled = Boolean(script.disabled);
+            globalItems.push(registerItem({
+                key: `regex:global::global::${scriptId}`,
+                categoryId: 'regex',
+                subgroupId: 'regex_global',
+                title: String(script.scriptName || `Regex toàn cục chưa đặt tên #${i + 1}`),
+                subtitle: `Regex toàn cục · ${disabled ? 'Đã tắt' : 'Đang bật'}${script.findRegex ? ` · Khớp: ${String(script.findRegex).slice(0, 40)}` : ''}`,
+                sizeBytes: 0,
+                isActive: !disabled,
+                facets: [disabled ? 'rx:disabled' : 'rx:enabled', 'rx:st_regex'],
+                badges: [
+                    ...(!disabled ? [{ text: 'Đang dùng', type: 'active' }] : [{ text: 'Đã tắt', type: 'muted' }]),
+                ],
+                payload: {
+                    kind: 'regex_global',
+                    scriptId,
+                    scriptName: String(script.scriptName || scriptId),
+                },
+            }));
+        }
+
+        // 2. Character-scoped embedded regex scripts
+        const scopedItems = [];
+        for (const ch of characters) {
+            if (!ch?.avatar) continue;
+            const scripts = ch?.data?.extensions?.regex_scripts;
+            if (!Array.isArray(scripts) || scripts.length === 0) continue;
+            const isCharActive = ch.avatar === activeCharAvatar;
+            for (let i = 0; i < scripts.length; i++) {
+                const script = scripts[i];
+                if (!script) continue;
+                const scriptId = String(script.id ?? `idx_${i}`);
+                const disabled = Boolean(script.disabled);
+                const isActive = isCharActive && !disabled;
+                scopedItems.push(registerItem({
+                    key: `regex:scoped::${ch.avatar}::${scriptId}`,
+                    categoryId: 'regex',
+                    subgroupId: 'regex_scoped',
+                    title: `${script.scriptName || `Regex cục bộ #${i + 1}`}`,
+                    subtitle: `Thuộc nhân vật: ${ch.name || ch.avatar} · ${disabled ? 'Đã tắt' : 'Đang bật'}`,
+                    sizeBytes: 0,
+                    isActive,
+                    facets: [disabled ? 'rx:disabled' : 'rx:enabled', 'rx:st_regex'],
+                    badges: [
+                        ...(isActive ? [{ text: 'Đang dùng', type: 'active' }] : (disabled ? [{ text: 'Đã tắt', type: 'muted' }] : [])),
+                        { text: ch.name || stripExt(ch.avatar, '.png'), type: 'info' },
+                    ],
+                    payload: {
+                        kind: 'regex_scoped',
+                        avatar: ch.avatar,
+                        characterName: ch.name || stripExt(ch.avatar, '.png'),
+                        scriptId,
+                        scriptName: String(script.scriptName || scriptId),
+                    },
+                }));
+            }
+        }
+
+        // 3. Preset-embedded regex scripts (OpenAI & TextGen presets)
+        const presetRegexItems = [];
+        const activeOaiPreset = ctx?.chatCompletionSettings?.preset_settings_openai
+            || settingsData?.settings?.preset_settings_openai
+            || '';
+        const activeTextGenPreset = settingsData?.settings?.preset_settings_textgenerationwebui || '';
+
+        const presetSources = [
+            {
+                apiId: 'openai',
+                apiLabel: 'Preset Chat Completion',
+                activeName: activeOaiPreset,
+                entries: getCachedNamedPresets(settingsData, 'openai', settingsData?.openai_settings, settingsData?.openai_setting_names),
+            },
+            {
+                apiId: 'textgenerationwebui',
+                apiLabel: 'Preset Text Completion',
+                activeName: activeTextGenPreset,
+                entries: getCachedNamedPresets(settingsData, 'textgen', settingsData?.textgenerationwebui_presets, settingsData?.textgenerationwebui_preset_names),
+            },
+        ];
+
+        for (const src of presetSources) {
+            for (const presetEntry of src.entries) {
+                const scripts = presetEntry.data?.extensions?.regex_scripts;
+                if (!Array.isArray(scripts) || scripts.length === 0) continue;
+                const isPresetActive = presetEntry.name === src.activeName;
+                for (let i = 0; i < scripts.length; i++) {
+                    const script = scripts[i];
+                    if (!script) continue;
+                    const scriptId = String(script.id ?? `idx_${i}`);
+                    const disabled = Boolean(script.disabled);
+                    const isActive = isPresetActive && !disabled;
+                    presetRegexItems.push(registerItem({
+                        key: `regex:preset::${src.apiId}:${presetEntry.name}::${scriptId}`,
+                        categoryId: 'regex',
+                        subgroupId: 'regex_preset',
+                        title: `${script.scriptName || `Regex Preset #${i + 1}`}`,
+                        subtitle: `Thuộc ${src.apiLabel}: ${presetEntry.name} · ${disabled ? 'Đã tắt' : 'Đang bật'}`,
+                        sizeBytes: 0,
+                        isActive,
+                        facets: [disabled ? 'rx:disabled' : 'rx:enabled', 'rx:st_regex'],
+                        badges: [
+                            ...(isActive ? [{ text: 'Đang dùng', type: 'active' }] : (disabled ? [{ text: 'Đã tắt', type: 'muted' }] : [])),
+                            { text: presetEntry.name, type: 'info' },
+                        ],
+                        payload: {
+                            kind: 'regex_preset',
+                            apiId: src.apiId,
+                            presetName: presetEntry.name,
+                            presetData: presetEntry.data,
+                            scriptId,
+                            scriptName: String(script.scriptName || scriptId),
+                        },
+                    }));
+                }
+            }
+        }
+
+        // 4. Regex toggle preset combinations (extension_settings.regex_presets)
+        const comboItems = [];
+        const combos = Array.isArray(extSettings.regex_presets) ? extSettings.regex_presets : [];
+        for (let i = 0; i < combos.length; i++) {
+            const combo = combos[i];
+            if (!combo) continue;
+            const comboKey = String(combo.id ?? combo.name ?? `combo_${i}`);
+            const refCount = (Array.isArray(combo.global) ? combo.global.length : 0)
+                + (Array.isArray(combo.scoped) ? combo.scoped.length : 0)
+                + (Array.isArray(combo.preset) ? combo.preset.length : 0);
+            const isActive = Boolean(combo.isSelected || extSettings.selected_regex_preset === combo.id || extSettings.selected_regex_preset === combo.name);
+            comboItems.push(registerItem({
+                key: `regex:combo::combo::${comboKey}`,
+                categoryId: 'regex',
+                subgroupId: 'regex_combos',
+                title: String(combo.name || `Tổ hợp Regex #${i + 1}`),
+                subtitle: `Chỉ xóa cấu hình bật/tắt (không xóa bản thân script) · Lưu trạng thái ${refCount} script`,
+                sizeBytes: 0,
+                isActive,
+                facets: ['rx:vars_combos'],
+                badges: [
+                    ...(isActive ? [{ text: 'Đang dùng', type: 'active' }] : []),
+                    { text: 'Cấu hình bật/tắt', type: 'muted' },
+                ],
+                payload: {
+                    kind: 'regex_combo',
+                    comboId: combo.id ?? null,
+                    comboName: combo.name ?? null,
+                },
+            }));
+        }
+
+        // 5. TavernHelper (JS-Slash-Runner) Global Scripts (v4 `tavern_helper` + v3 `TavernHelper`)
+        const thGlobalItems = [];
+        const thGlobalEnabled = extSettings?.tavern_helper?.script?.enabled?.global !== false
+            && extSettings?.TavernHelper?.script?.global_script_enabled !== false;
+        const thGlobalTree = [
+            ...(Array.isArray(extSettings?.tavern_helper?.script?.scripts) ? extSettings.tavern_helper.script.scripts : []),
+            ...(Array.isArray(extSettings?.TavernHelper?.script?.scriptsRepository) ? extSettings.TavernHelper.script.scriptsRepository : []),
+        ];
+        const seenThGlobalIds = new Set();
+        for (const sc of extractTavernHelperScripts(thGlobalTree)) {
+            if (seenThGlobalIds.has(sc.id)) continue;
+            seenThGlobalIds.add(sc.id);
+            const isEnabled = sc.folderEnabled && sc.enabled;
+            const isActive = thGlobalEnabled && isEnabled;
+            thGlobalItems.push(registerItem({
+                key: `th:global::${sc.id}`,
+                categoryId: 'regex',
+                subgroupId: 'th_global',
+                title: sc.name,
+                subtitle: `Script toàn cục TavernHelper${sc.folderName ? ` · Thư mục: ${sc.folderName}` : ''} · ${isEnabled ? 'Đang bật' : 'Đã tắt'}${sc.info ? ` · ${sc.info.slice(0, 36)}` : ''}`,
+                sizeBytes: 0,
+                isActive,
+                facets: [
+                    isEnabled ? 'rx:enabled' : 'rx:disabled',
+                    'rx:tavern_helper',
+                    ...(sc.folderName ? ['rx:folder'] : []),
+                ],
+                badges: [
+                    ...(isActive ? [{ text: 'Đang dùng', type: 'active' }] : [{ text: 'Đã tắt', type: 'muted' }]),
+                    ...(sc.folderName ? [{ text: sc.folderName, type: 'info' }] : []),
+                ],
+                payload: {
+                    kind: 'th_global',
+                    scriptId: sc.id,
+                    scriptName: sc.name,
+                },
+            }));
+        }
+
+        // 6. TavernHelper Character-Scoped Scripts (v4 `data.extensions.tavern_helper.scripts` + v3 `TavernHelper_scripts`)
+        const thCharItems = [];
+        const thEnabledChars = new Set([
+            ...(Array.isArray(extSettings?.tavern_helper?.script?.enabled?.characters) ? extSettings.tavern_helper.script.enabled.characters : []),
+            ...(Array.isArray(extSettings?.TavernHelper?.script?.characters_with_scripts) ? extSettings.TavernHelper.script.characters_with_scripts : []),
+        ]);
+        for (const ch of characters) {
+            if (!ch?.avatar) continue;
+            const rawTree = Array.isArray(ch?.data?.extensions?.tavern_helper?.scripts)
+                ? ch.data.extensions.tavern_helper.scripts
+                : (Array.isArray(ch?.data?.extensions?.TavernHelper_scripts) ? ch.data.extensions.TavernHelper_scripts : null);
+            if (!rawTree || rawTree.length === 0) continue;
+            const parsedList = extractTavernHelperScripts(rawTree);
+            const isCharActive = ch.avatar === activeCharAvatar;
+            const charScriptAllowed = thEnabledChars.size === 0 || thEnabledChars.has(ch.avatar) || thEnabledChars.has(ch.name);
+
+            for (const sc of parsedList) {
+                const isEnabled = sc.folderEnabled && sc.enabled;
+                const isActive = isCharActive && charScriptAllowed && isEnabled;
+                thCharItems.push(registerItem({
+                    key: `th:char::${ch.avatar}::${sc.id}`,
+                    categoryId: 'regex',
+                    subgroupId: 'th_char',
+                    title: sc.folderName ? `[${sc.folderName}] ${sc.name}` : sc.name,
+                    subtitle: `Thuộc nhân vật: ${ch.name || ch.avatar} · Script cục bộ TavernHelper · ${isEnabled ? 'Đang bật' : 'Đã tắt'}`,
+                    sizeBytes: 0,
+                    isActive,
+                    facets: [
+                        isEnabled ? 'rx:enabled' : 'rx:disabled',
+                        'rx:tavern_helper',
+                        ...(sc.folderName ? ['rx:folder'] : []),
+                    ],
+                    badges: [
+                        ...(isActive ? [{ text: 'Đang dùng', type: 'active' }] : (!isEnabled ? [{ text: 'Đã tắt', type: 'muted' }] : [])),
+                        { text: ch.name || stripExt(ch.avatar, '.png'), type: 'info' },
+                    ],
+                    payload: {
+                        kind: 'th_char',
+                        avatar: ch.avatar,
+                        characterName: ch.name || stripExt(ch.avatar, '.png'),
+                        scriptId: sc.id,
+                        scriptName: sc.name,
+                    },
+                }));
+            }
+        }
+
+        // 7. TavernHelper Preset-Embedded Scripts (`preset.extensions.tavern_helper.scripts`)
+        const thPresetItems = [];
+        const thEnabledPresets = new Set(
+            Array.isArray(extSettings?.tavern_helper?.script?.enabled?.presets) ? extSettings.tavern_helper.script.enabled.presets : [],
+        );
+        const oaiEntries = presetSources[0]?.entries || [];
+        for (const presetEntry of oaiEntries) {
+            const rawTree = presetEntry.data?.extensions?.tavern_helper?.scripts;
+            if (!Array.isArray(rawTree) || rawTree.length === 0) continue;
+            const parsedList = extractTavernHelperScripts(rawTree);
+            const isPresetActive = presetEntry.name === activeOaiPreset;
+            const presetAllowed = thEnabledPresets.size === 0 || thEnabledPresets.has(presetEntry.name);
+            for (const sc of parsedList) {
+                const isEnabled = sc.folderEnabled && sc.enabled;
+                const isActive = isPresetActive && presetAllowed && isEnabled;
+                thPresetItems.push(registerItem({
+                    key: `th:preset::openai:${presetEntry.name}::${sc.id}`,
+                    categoryId: 'regex',
+                    subgroupId: 'th_preset',
+                    title: sc.folderName ? `[${sc.folderName}] ${sc.name}` : sc.name,
+                    subtitle: `Thuộc Preset Chat: ${presetEntry.name} · Script Preset TavernHelper · ${isEnabled ? 'Đang bật' : 'Đã tắt'}`,
+                    sizeBytes: 0,
+                    isActive,
+                    facets: [
+                        isEnabled ? 'rx:enabled' : 'rx:disabled',
+                        'rx:tavern_helper',
+                        ...(sc.folderName ? ['rx:folder'] : []),
+                    ],
+                    badges: [
+                        ...(isActive ? [{ text: 'Đang dùng', type: 'active' }] : (!isEnabled ? [{ text: 'Đã tắt', type: 'muted' }] : [])),
+                        { text: presetEntry.name, type: 'info' },
+                    ],
+                    payload: {
+                        kind: 'th_preset',
+                        apiId: 'openai',
+                        presetName: presetEntry.name,
+                        presetData: presetEntry.data,
+                        scriptId: sc.id,
+                        scriptName: sc.name,
+                    },
+                }));
+            }
+        }
+
+        // 8. Persistent ST Global Script Variables (`extension_settings.variables.global`)
+        const globalVarItems = [];
+        const globalVarsObj = extSettings?.variables?.global;
+        if (globalVarsObj && typeof globalVarsObj === 'object' && !Array.isArray(globalVarsObj)) {
+            for (const [varKey, rawVal] of Object.entries(globalVarsObj)) {
+                if (!varKey) continue;
+                let valStr = '';
+                try {
+                    valStr = rawVal !== null && typeof rawVal === 'object'
+                        ? (JSON.stringify(rawVal) ?? '')
+                        : String(rawVal ?? '');
+                } catch {
+                    valStr = '[Đối tượng phức tạp]';
+                }
+                globalVarItems.push(registerItem({
+                    key: `gvar:${varKey}`,
+                    categoryId: 'regex',
+                    subgroupId: 'global_vars',
+                    title: varKey,
+                    subtitle: `Biến toàn cục bền vững STscript · Xem trước giá trị: ${valStr.slice(0, 48)}${valStr.length > 48 ? '...' : ''}`,
+                    sizeBytes: valStr.length,
+                    isActive: false,
+                    facets: ['rx:vars_combos'],
+                    badges: [{ text: 'Biến toàn cục', type: 'muted' }],
+                    payload: {
+                        kind: 'global_var',
+                        varKey,
+                    },
+                }));
+            }
+        }
+
+        return [
+            { id: 'regex_global', label: 'Regex toàn cục', items: globalItems },
+            { id: 'regex_scoped', label: 'Regex cục bộ nhân vật', items: scopedItems },
+            { id: 'regex_preset', label: 'Regex nhúng trong Preset', items: presetRegexItems },
+            { id: 'regex_combos', label: 'Bộ tổ hợp Regex', items: comboItems },
+            { id: 'th_global', label: 'Script toàn cục TavernHelper', items: thGlobalItems },
+            { id: 'th_char', label: 'Script nhân vật TavernHelper', items: thCharItems },
+            { id: 'th_preset', label: 'Script Preset TavernHelper', items: thPresetItems },
+            { id: 'global_vars', label: 'Biến script toàn cục ST', items: globalVarItems },
+        ];
+    }
+
+    async function scanWorldInfoCategory(signal, onProgress) {
+        await ensureCharactersUnshallowed(signal, onProgress);
+        const [settingsData, hostMods] = await Promise.all([
+            getSettingsSnapshot(signal),
+            loadHostModules(),
+        ]);
+        const ctx = getContext();
+        const characters = Array.isArray(ctx?.characters) ? ctx.characters : [];
+        const activeCharIndex = ctx?.characterId !== undefined && ctx?.characterId !== null && ctx?.characterId !== ''
+            ? Number(ctx.characterId)
+            : -1;
+        const activeChar = activeCharIndex >= 0 ? characters[activeCharIndex] : null;
+        const tagMap = ctx?.tagMap || ctx?.tag_map || {};
+        const validTagIdSet = new Set(
+            (Array.isArray(ctx?.tags) ? ctx.tags : [])
+                .filter(t => t && t.id !== undefined && t.id !== null)
+                .map(t => t.id),
+        );
+
+        const liveWorldNames = hostMods?.worldInfo?.world_names;
+        const rawNames = Array.isArray(liveWorldNames) && liveWorldNames.length > 0
+            ? liveWorldNames
+            : (Array.isArray(ctx?.worldNames) && ctx.worldNames.length > 0
+                ? ctx.worldNames
+                : (Array.isArray(settingsData?.world_names) ? settingsData.world_names : []));
+        const worldNames = [...new Set(rawNames.map(x => String(x || '').trim()).filter(Boolean))];
+        const bindings = collectWorldInfoBindings(ctx, hostMods);
+
+        const globalActiveArr = hostMods?.worldInfo?.selected_world_info
+            || ctx?.worldInfo?.globalSelect
+            || ctx?.selected_world_info
+            || settingsData?.settings?.world_info?.globalSelect
+            || [];
+        const globalActiveSet = new Set(Array.isArray(globalActiveArr) ? globalActiveArr : []);
+        const activeCharWorld = activeChar?.data?.extensions?.world || '';
+
+        const unboundItems = [];
+        const boundItems = [];
+        for (const name of worldNames) {
+            const bindRec = bindings.get(name);
+            const boundTargets = bindRec ? bindRec.labels : [];
+            const isBuiltin = name === 'Eldoria';
+            const isActive = globalActiveSet.has(name) || name === activeCharWorld;
+            if (boundTargets.length === 0) {
+                unboundItems.push(registerItem({
+                    key: `wi:standalone::${name}`,
+                    categoryId: 'worldinfo',
+                    subgroupId: 'wi_unbound',
+                    title: name,
+                    subtitle: `Worldbook độc lập · Không gắn với toàn cục/nhân vật/Persona (nhàn rỗi, có thể xóa an toàn)${isBuiltin ? ' · Worldbook mẫu mặc định của ST' : ''}`,
+                    sizeBytes: 0,
+                    isActive: false,
+                    facets: [isBuiltin ? 'src:builtin' : 'src:user', 'wi:unbound'],
+                    badges: [
+                        { text: 'Chưa gắn', type: 'muted' },
+                        ...(isBuiltin ? [{ text: 'Mặc định ST', type: 'builtin' }] : []),
+                    ],
+                    payload: {
+                        kind: 'wi_standalone',
+                        name,
+                        boundTargets: [],
+                    },
+                }));
+            } else {
+                const scopeFacets = [...bindRec.scopes];
+                const tagFacets = [...bindRec.tagIds].filter(id => validTagIdSet.has(id)).map(id => `tag:${id}`);
+                const scopeBadges = [];
+                if (bindRec.scopes.has('wi:global')) scopeBadges.push({ text: 'Bật toàn cục', type: 'info' });
+                if (bindRec.scopes.has('wi:char_primary')) scopeBadges.push({ text: 'Sách chính NV', type: 'info' });
+                if (bindRec.scopes.has('wi:char_extra')) scopeBadges.push({ text: 'Sách phụ NV', type: 'muted' });
+                if (bindRec.scopes.has('wi:persona_chat')) scopeBadges.push({ text: 'Persona/Chat', type: 'muted' });
+
+                boundItems.push(registerItem({
+                    key: `wi:standalone::${name}`,
+                    categoryId: 'worldinfo',
+                    subgroupId: 'wi_bound',
+                    title: name,
+                    subtitle: `Đã gắn với: ${boundTargets.join(', ')}`,
+                    sizeBytes: 0,
+                    sortMetric: boundTargets.length,
+                    isActive,
+                    isCaution: true,
+                    facets: [isBuiltin ? 'src:builtin' : 'src:user', ...scopeFacets, ...tagFacets],
+                    badges: [
+                        ...(isActive ? [{ text: 'Đang dùng', type: 'active' }] : []),
+                        { text: `Gắn×${boundTargets.length}`, type: 'warn' },
+                        ...scopeBadges.slice(0, 2),
+                        ...(isBuiltin ? [{ text: 'Mặc định ST', type: 'builtin' }] : []),
+                    ],
+                    payload: {
+                        kind: 'wi_standalone',
+                        name,
+                        boundTargets,
+                    },
+                }));
+            }
+        }
+
+        const embeddedItems = [];
+        for (const ch of characters) {
+            if (!ch?.avatar) continue;
+            const book = ch?.data?.character_book;
+            const entries = Array.isArray(book?.entries)
+                ? book.entries
+                : (book?.entries && typeof book?.entries === 'object' ? Object.values(book.entries) : []);
+            if (!book || entries.length === 0) continue;
+
+            const isActive = activeChar?.avatar === ch.avatar;
+            const charTagFacets = (Array.isArray(tagMap[ch.avatar]) ? tagMap[ch.avatar] : [])
+                .filter(id => validTagIdSet.has(id))
+                .map(id => `tag:${id}`);
+            embeddedItems.push(registerItem({
+                key: `wi:embedded::${ch.avatar}`,
+                categoryId: 'worldinfo',
+                subgroupId: 'wi_embedded',
+                title: `${ch.name || stripExt(ch.avatar, '.png')} — Worldbook nhúng${book.name ? ` (${book.name})` : ''}`,
+                subtitle: `Làm trống character_book nhúng trong thẻ nhân vật (giữ lại thẻ nhân vật và lịch sử chat) · Tổng ${entries.length} mục`,
+                sizeBytes: 0,
+                sortTimeMs: parseTavernTimestamp(ch.date_last_chat || ch.date_added || ch.create_date),
+                sortMetric: entries.length,
+                isActive,
+                facets: ['src:user', 'wi:embedded', ...charTagFacets],
+                badges: [
+                    ...(isActive ? [{ text: 'Đang dùng', type: 'active' }] : []),
+                    { text: `${entries.length} mục`, type: 'info' },
+                ],
+                payload: {
+                    kind: 'wi_embedded',
+                    avatar: ch.avatar,
+                    characterName: ch.name || stripExt(ch.avatar, '.png'),
+                    bookName: book.name || '',
+                },
+            }));
+        }
+
+        return [
+            { id: 'wi_unbound', label: 'Worldbook nhàn rỗi chưa gắn', items: unboundItems },
+            { id: 'wi_bound', label: 'Worldbook độc lập đã gắn', items: boundItems },
+            { id: 'wi_embedded', label: 'Worldbook nhúng trong nhân vật', items: embeddedItems },
+        ];
+    }
+
+    async function scanPresetsCategory(signal) {
+        const settingsData = await getSettingsSnapshot(signal);
+        const ctx = getContext();
+        const powerUser = ctx?.powerUserSettings || ctx?.power_user || settingsData?.settings?.power_user || {};
+        const stSettings = settingsData?.settings || {};
+
+        const presetBuckets = [
+            {
+                subgroupId: 'preset_openai',
+                label: 'Preset Chat Completion',
+                apiId: 'openai',
+                activeName: ctx?.chatCompletionSettings?.preset_settings_openai || stSettings.preset_settings_openai || '',
+                list: getCachedNamedPresets(settingsData, 'openai', settingsData?.openai_settings, settingsData?.openai_setting_names),
+            },
+            {
+                subgroupId: 'preset_textgen',
+                label: 'Preset Text Completion',
+                apiId: 'textgenerationwebui',
+                activeName: stSettings.preset_settings_textgenerationwebui || '',
+                list: getCachedNamedPresets(settingsData, 'textgen', settingsData?.textgenerationwebui_presets, settingsData?.textgenerationwebui_preset_names),
+            },
+            {
+                subgroupId: 'preset_instruct',
+                label: 'Mẫu Instruct',
+                apiId: 'instruct',
+                activeName: powerUser?.instruct?.preset || '',
+                list: getCachedNamedPresets(settingsData, 'instruct', settingsData?.instruct, settingsData?.instruct),
+            },
+            {
+                subgroupId: 'preset_context',
+                label: 'Mẫu Context',
+                apiId: 'context',
+                activeName: powerUser?.context?.preset || '',
+                list: getCachedNamedPresets(settingsData, 'context', settingsData?.context, settingsData?.context),
+            },
+            {
+                subgroupId: 'preset_sysprompt',
+                label: 'System Prompt',
+                apiId: 'sysprompt',
+                activeName: powerUser?.sysprompt?.preset || '',
+                list: getCachedNamedPresets(settingsData, 'sysprompt', settingsData?.sysprompt, settingsData?.sysprompt),
+            },
+            {
+                subgroupId: 'preset_reasoning',
+                label: 'Mẫu Reasoning',
+                apiId: 'reasoning',
+                activeName: powerUser?.reasoning?.preset || '',
+                list: getCachedNamedPresets(settingsData, 'reasoning', settingsData?.reasoning, settingsData?.reasoning),
+            },
+            {
+                subgroupId: 'preset_novel',
+                label: 'Preset NovelAI',
+                apiId: 'novel',
+                activeName: stSettings.preset_settings_novel || '',
+                list: getCachedNamedPresets(settingsData, 'novel', settingsData?.novelai_settings, settingsData?.novelai_setting_names),
+            },
+            {
+                subgroupId: 'preset_kobold',
+                label: 'Preset KoboldAI',
+                apiId: 'kobold',
+                activeName: stSettings.preset_settings_kobold || '',
+                list: getCachedNamedPresets(settingsData, 'kobold', settingsData?.koboldai_settings, settingsData?.koboldai_setting_names),
+            },
+        ];
+
+        const CORE_SOLE_GUARD_APIS = new Set(['openai', 'textgenerationwebui', 'instruct', 'context', 'sysprompt', 'reasoning']);
+        return presetBuckets.map((bucket) => {
+            const validEntries = bucket.list.filter(e => e?.name && e.name !== 'gui');
+            const allNames = validEntries.map(e => e.name);
+            const items = [];
+            for (const entry of validEntries) {
+                const isActive = Boolean(bucket.activeName && entry.name === bucket.activeName);
+                const isBuiltin = OFFICIAL_BUILTIN_PRESET_NAMES.has(entry.name);
+                const isSoleRemaining = validEntries.length === 1 && CORE_SOLE_GUARD_APIS.has(bucket.apiId);
+                const isDefaultAnchor = (
+                    ((bucket.apiId === 'openai' || bucket.apiId === 'textgenerationwebui' || bucket.apiId === 'context') && entry.name === 'Default')
+                    || ((bucket.apiId === 'sysprompt' || bucket.apiId === 'reasoning') && (entry.name === 'Blank' || entry.name === 'Default'))
+                    || isSoleRemaining
+                );
+                const otherNames = allNames.filter(n => n !== entry.name);
+                otherNames.sort((a, b) => {
+                    const rank = (n) => (n === 'Default' ? 0 : (n === 'Blank' ? 1 : 2));
+                    return rank(a) - rank(b);
+                });
+                const fallbackPresetName = otherNames[0] || null;
+                const criticalReason = isDefaultAnchor
+                    ? (isSoleRemaining && entry.name !== 'Default' && entry.name !== 'Blank'
+                        ? 'Mẫu duy nhất còn lại của engine này (xóa sạch sẽ khiến bảng tương ứng không có Preset khả dụng hoặc báo lỗi)'
+                        : 'Preset dự phòng cốt lõi của engine này (xóa sạch sẽ gây lỗi bảng Preset/xuất tệp và khởi động lại ST sẽ không tự tạo lại)')
+                    : '';
+
+                let subtitle = `${bucket.label} (${bucket.apiId})`;
+                if (isDefaultAnchor) {
+                    subtitle += ' · ⚠️ Preset dự phòng cốt lõi (xóa rồi khởi động lại ST sẽ không tự tạo lại)';
+                } else if (isBuiltin) {
+                    subtitle += ' · Mẫu mặc định của SillyTavern (xóa rồi khởi động lại sẽ không tự khôi phục)';
+                } else {
+                    subtitle += ' · Preset người dùng tự tạo/nhập';
+                }
+
+                const facets = [isBuiltin ? 'src:builtin' : 'src:user'];
+                if (isDefaultAnchor) facets.push('crit:essential');
+
+                items.push(registerItem({
+                    key: `preset:${bucket.apiId}::${entry.name}`,
+                    categoryId: 'presets',
+                    subgroupId: bucket.subgroupId,
+                    title: entry.name,
+                    subtitle,
+                    sizeBytes: 0,
+                    isActive,
+                    isCritical: isDefaultAnchor,
+                    criticalReason,
+                    facets,
+                    badges: [
+                        ...(isActive ? [{ text: 'Đang dùng', type: 'active' }] : []),
+                        ...(isDefaultAnchor ? [{ text: '⚠️ Nền tảng cốt lõi', type: 'critical' }] : []),
+                        ...(isBuiltin ? [{ text: 'Mặc định ST', type: 'builtin' }] : [{ text: 'Tự tạo', type: 'user' }]),
+                    ],
+                    payload: {
+                        kind: 'preset',
+                        apiId: bucket.apiId,
+                        name: entry.name,
+                        isActive,
+                        fallbackPresetName,
+                        candidateFallbacks: otherNames,
+                    },
+                }));
+            }
+            return {
+                id: bucket.subgroupId,
+                label: bucket.label,
+                items,
+            };
+        });
+    }
+
+    async function scanProfilesCategory() {
+        const ctx = getContext();
+        const extSettings = ctx?.extensionSettings || ctx?.extension_settings || {};
+        const cm = extSettings?.connectionManager || {};
+        const profiles = Array.isArray(cm.profiles) ? cm.profiles : [];
+        const selectedId = cm.selectedProfile || '';
+
+        const items = [];
+        for (const p of profiles) {
+            if (!p?.id) continue;
+            const isActive = p.id === selectedId;
+            const details = [
+                p.mode ? `Chế độ: ${p.mode}` : '',
+                p.api ? `API: ${p.api}` : '',
+                p.model ? `Model: ${p.model}` : '',
+                p['api-url'] ? `URL: ${p['api-url']}` : '',
+            ].filter(Boolean);
+            const apiTag = p.api ? `api:${String(p.api).toLowerCase()}` : '';
+            items.push(registerItem({
+                key: `profile:${p.id}`,
+                categoryId: 'profiles',
+                subgroupId: 'conn_profiles',
+                title: String(p.name || p.id),
+                subtitle: `${details.length > 0 ? details.join(' · ') : `ID: ${p.id}`} · ⚠️ Xóa sẽ gỡ địa chỉ proxy và liên kết model (không đụng tới khóa trong secrets.json)`,
+                sizeBytes: 0,
+                isActive,
+                isCaution: true,
+                facets: ['src:user', ...(apiTag ? [apiTag] : [])],
+                badges: [
+                    ...(isActive ? [{ text: 'Đang dùng', type: 'active' }] : []),
+                    { text: '⚠️ Có URL kết nối', type: 'warn' },
+                    ...(p.api ? [{ text: String(p.api), type: 'info' }] : []),
+                ],
+                payload: {
+                    kind: 'conn_profile',
+                    id: p.id,
+                    name: String(p.name || p.id),
+                    apiLabel: p.api ? String(p.api) : '',
+                },
+            }));
+        }
+
+        return [{ id: 'conn_profiles', label: 'Hồ sơ kết nối API', items }];
+    }
+
+    async function scanPersonasCategory(signal) {
+        const ctx = getContext();
+        const powerUser = ctx?.powerUserSettings || ctx?.power_user || {};
+        const chatMeta = ctx?.chatMetadata || ctx?.chat_metadata || {};
+
+        const [avatarsRes, bgsRes, settingsData, hostMods] = await Promise.all([
+            apiJson('api/avatars/get', { method: 'POST', body: {}, signal }).catch(() => []),
+            apiJson('api/backgrounds/all', { method: 'POST', body: {}, signal }).catch(() => []),
+            getSettingsSnapshot(signal),
+            loadHostModules(),
+        ]);
+
+        // 1. User Personas
+        const avatarSet = new Set(Array.isArray(avatarsRes) ? avatarsRes : []);
+        if (powerUser?.personas && typeof powerUser.personas === 'object') {
+            for (const k of Object.keys(powerUser.personas)) {
+                if (k) avatarSet.add(k);
+            }
+        }
+
+        const activePersona = hostMods?.personas?.user_avatar || ctx?.userAvatar || settingsData?.settings?.user_avatar || chatMeta?.persona || '';
+        const defaultPersona = powerUser?.default_persona || '';
+        const personaItems = [];
+        for (const avatarFile of avatarSet) {
+            const alias = powerUser?.personas?.[avatarFile] || stripExt(avatarFile, '.png');
+            const descObj = powerUser?.persona_descriptions?.[avatarFile];
+            const lorebook = descObj?.lorebook ? ` · Worldbook gắn kèm: ${descObj.lorebook}` : '';
+            const isActive = avatarFile === activePersona;
+            const isDefault = avatarFile === defaultPersona;
+            const isBuiltin = avatarFile === 'user-default.png';
+            const isCritical = isBuiltin || isDefault;
+            const criticalReason = isBuiltin
+                ? 'Nền tảng Persona người dùng mặc định của ST (xóa rồi không có avatar dự phòng và khởi động lại ST sẽ không tự khôi phục)'
+                : (isDefault ? 'Đang đặt làm Persona mặc định (nên chuyển Persona mặc định khác trước khi xóa)' : '');
+            const pFacets = [isBuiltin ? 'src:builtin' : 'src:user'];
+            if (isCritical) pFacets.push('crit:essential');
+
+            personaItems.push(registerItem({
+                key: `persona:${avatarFile}`,
+                categoryId: 'personas',
+                subgroupId: 'user_personas',
+                title: alias && alias !== avatarFile ? alias : avatarFile,
+                subtitle: `Tệp avatar: ${avatarFile}${lorebook}${isBuiltin ? ' · Nền tảng Persona mặc định ban đầu' : ''}`,
+                sizeBytes: 0,
+                isActive,
+                isCritical,
+                criticalReason,
+                facets: pFacets,
+                badges: [
+                    ...(isActive ? [{ text: 'Đang dùng', type: 'active' }] : []),
+                    ...(isCritical ? [{ text: '⚠️ Nền tảng cốt lõi', type: 'critical' }] : []),
+                    ...(isDefault ? [{ text: 'Persona mặc định', type: 'warn' }] : []),
+                    ...(isBuiltin ? [{ text: 'Mặc định ST', type: 'builtin' }] : [{ text: 'Tự tạo', type: 'user' }]),
+                ],
+                payload: {
+                    kind: 'user_persona',
+                    avatar: avatarFile,
+                    name: alias,
+                },
+            }));
+        }
+
+        // 2. Backgrounds
+        const parsedBgs = parseBackgroundsPayload(bgsRes);
+        const activeBgRaw = String(
+            settingsData?.settings?.background
+            || powerUser?.custom_background
+            || '',
+        );
+        const bgItems = [];
+        for (const bg of parsedBgs) {
+            const isActive = Boolean(activeBgRaw && (activeBgRaw === bg.filename || activeBgRaw.includes(bg.filename)));
+            const isBuiltin = OFFICIAL_BUILTIN_BACKGROUNDS.has(bg.filename);
+            bgItems.push(registerItem({
+                key: `bg:${bg.filename}`,
+                categoryId: 'personas',
+                subgroupId: 'backgrounds',
+                title: bg.filename,
+                subtitle: `${bg.isAnimated ? 'Hình nền video/ảnh động' : 'Hình nền tĩnh'}${isBuiltin ? ' · Hình nền mặc định của ST (xóa rồi khởi động lại sẽ không tự khôi phục)' : ' · Hình nền người dùng tải lên'}`,
+                sizeBytes: 0,
+                isActive,
+                facets: [
+                    isBuiltin ? 'src:builtin' : 'src:user',
+                    bg.isAnimated ? 'bg:animated' : 'bg:static',
+                ],
+                badges: [
+                    ...(isActive ? [{ text: 'Đang dùng', type: 'active' }] : []),
+                    ...(bg.isAnimated ? [{ text: 'Động', type: 'info' }] : []),
+                    ...(isBuiltin ? [{ text: 'Mặc định ST', type: 'builtin' }] : [{ text: 'Tải lên', type: 'user' }]),
+                ],
+                payload: {
+                    kind: 'background',
+                    bg: bg.filename,
+                },
+            }));
+        }
+
+        // 3. Custom Themes
+        const themes = Array.isArray(settingsData?.themes) ? settingsData.themes : [];
+        const activeTheme = powerUser?.theme || settingsData?.settings?.theme || '';
+        const themeItems = [];
+        for (const th of themes) {
+            const name = typeof th === 'string' ? th : th?.name;
+            if (!name) continue;
+            const isActive = name === activeTheme;
+            const isBuiltin = OFFICIAL_BUILTIN_THEMES.has(name);
+            const isCritical = name === 'Dark Lite';
+            const criticalReason = isCritical
+                ? 'Giao diện dự phòng cơ bản của ST (xóa sạch toàn bộ giao diện sẽ làm trống hộp chọn phối màu và khởi động lại không tự khôi phục)'
+                : '';
+            const tFacets = [isBuiltin ? 'src:builtin' : 'src:user'];
+            if (isCritical) tFacets.push('crit:essential');
+
+            themeItems.push(registerItem({
+                key: `theme:${name}`,
+                categoryId: 'personas',
+                subgroupId: 'themes',
+                title: name,
+                subtitle: `${isCritical ? '⚠️ Giao diện phối màu dự phòng cơ bản của ST' : (isBuiltin ? 'Giao diện phối màu mặc định của ST' : 'Giao diện phối màu tùy chỉnh của người dùng')} (.json)`,
+                sizeBytes: 0,
+                isActive,
+                isCritical,
+                criticalReason,
+                facets: tFacets,
+                badges: [
+                    ...(isActive ? [{ text: 'Đang dùng', type: 'active' }] : []),
+                    ...(isCritical ? [{ text: '⚠️ Nền tảng cốt lõi', type: 'critical' }] : []),
+                    ...(isBuiltin ? [{ text: 'Mặc định ST', type: 'builtin' }] : [{ text: 'Tự tạo', type: 'user' }]),
+                ],
+                payload: {
+                    kind: 'theme',
+                    name,
+                },
+            }));
+        }
+
+        return [
+            { id: 'user_personas', label: 'Persona người dùng', items: personaItems },
+            { id: 'backgrounds', label: 'Hình nền', items: bgItems },
+            { id: 'themes', label: 'Giao diện tùy chỉnh', items: themeItems },
+        ];
+    }
+
+    async function scanMediaCategory(signal, onProgress) {
+        const ctx = getContext();
+        const extSettings = ctx?.extensionSettings || ctx?.extension_settings || {};
+        const chatMeta = ctx?.chatMetadata || ctx?.chat_metadata || {};
+        const characters = Array.isArray(ctx?.characters) ? ctx.characters : [];
+        const charByAvatar = new Map(
+            characters
+                .filter(c => c && c.avatar)
+                .map(c => [c.avatar, c.name || stripExt(c.avatar, '.png')]),
+        );
+        const settingsData = await getSettingsSnapshot(signal);
+
+        // 1. Quick Replies
+        const qrPresets = Array.isArray(settingsData?.quickReplyPresets) ? settingsData.quickReplyPresets : [];
+        const qrConfig = extSettings?.quickReplyV2 || {};
+        const activeQrNames = new Set();
+        if (Array.isArray(qrConfig?.config?.setList)) {
+            for (const s of qrConfig.config.setList) {
+                if (s?.set) activeQrNames.add(s.set);
+                if (typeof s === 'string') activeQrNames.add(s);
+            }
+        }
+        const qrItems = [];
+        for (const qr of qrPresets) {
+            const name = typeof qr === 'string' ? qr : qr?.name;
+            if (!name) continue;
+            const count = Array.isArray(qr?.qrList) ? qr.qrList.length : 0;
+            const isActive = activeQrNames.has(name);
+            const isBuiltin = name === 'Default';
+            const isCritical = name === 'Default';
+            const qrFacets = [isBuiltin ? 'src:builtin' : 'src:user'];
+            if (isCritical) qrFacets.push('crit:essential');
+
+            qrItems.push(registerItem({
+                key: `qr:${name}`,
+                categoryId: 'media',
+                subgroupId: 'quick_replies',
+                title: name,
+                subtitle: `Bộ Quick Reply · ${count} nút lệnh${isCritical ? ' · ⚠️ Nền tảng Quick Reply mặc định của ST' : ''}`,
+                sizeBytes: 0,
+                sortMetric: count,
+                isActive,
+                isCritical,
+                criticalReason: isCritical ? 'Nền tảng Quick Reply mặc định của ST (xóa rồi khởi động lại ST sẽ không tự khôi phục)' : '',
+                facets: qrFacets,
+                badges: [
+                    ...(isActive ? [{ text: 'Đang dùng', type: 'active' }] : []),
+                    ...(isCritical ? [{ text: '⚠️ Nền tảng cốt lõi', type: 'critical' }] : []),
+                    ...(isBuiltin ? [{ text: 'Mặc định ST', type: 'builtin' }] : []),
+                    { text: `${count} mục`, type: 'muted' },
+                ],
+                payload: {
+                    kind: 'quick_reply',
+                    name,
+                },
+            }));
+        }
+
+        // 2. Data Bank Attachments (global, character, current chat)
+        const databankItems = [];
+        const pushAttachment = (att, scope, ownerKey, ownerLabel, isActive) => {
+            if (!att?.url) return;
+            const url = String(att.url);
+            const baseName = url.replace(/\\/g, '/').split('/').pop() || '';
+            if (!baseName) return;
+            // SillyTavern's POST api/files/delete resolves relative to user root (`user/files/<name>`)
+            const serverRelPath = `user/files/${baseName}`;
+            databankItems.push(registerItem({
+                key: `databank:${scope}::${ownerKey}::${url}`,
+                categoryId: 'media',
+                subgroupId: 'databank',
+                title: String(att.name || baseName),
+                subtitle: `${ownerLabel} · Tệp: ${baseName}${att.size ? ` · ${Math.max(1, Math.round(Number(att.size) / 1024))} KB` : ''}`,
+                sizeBytes: Number(att.size) || 0,
+                sortTimeMs: parseTavernTimestamp(att.created),
+                isActive,
+                facets: ['src:user'],
+                badges: [
+                    ...(isActive ? [{ text: 'Đang dùng', type: 'active' }] : []),
+                    { text: scope === 'global' ? 'Data Bank toàn cục' : (scope === 'character' ? 'Data Bank nhân vật' : 'Phiên chat hiện tại'), type: 'info' },
+                ],
+                payload: {
+                    kind: 'databank',
+                    scope,
+                    ownerKey,
+                    url,
+                    filePath: serverRelPath,
+                    name: String(att.name || baseName),
+                },
+            }));
+        };
+
+        if (Array.isArray(extSettings.attachments)) {
+            const disabledGlobal = new Set(Array.isArray(extSettings.disabled_attachments) ? extSettings.disabled_attachments : []);
+            for (const att of extSettings.attachments) {
+                pushAttachment(att, 'global', 'global', 'Tệp đính kèm Data Bank toàn cục', !disabledGlobal.has(att?.url));
+            }
+        }
+        if (extSettings.character_attachments && typeof extSettings.character_attachments === 'object') {
+            const activeIdx = ctx?.characterId !== undefined && ctx?.characterId !== null && ctx?.characterId !== '' ? Number(ctx.characterId) : -1;
+            const activeAvatar = activeIdx >= 0 ? characters[activeIdx]?.avatar : null;
+            for (const [avatar, arr] of Object.entries(extSettings.character_attachments)) {
+                if (!Array.isArray(arr)) continue;
+                const cName = charByAvatar.get(avatar) || avatar;
+                for (const att of arr) {
+                    pushAttachment(att, 'character', avatar, `Data Bank nhân vật: ${cName}`, avatar === activeAvatar);
+                }
+            }
+        }
+        if (Array.isArray(chatMeta?.attachments)) {
+            for (const att of chatMeta.attachments) {
+                pushAttachment(att, 'chat', 'current_chat', 'Tệp đính kèm phiên chat đang mở', true);
+            }
+        }
+
+        // 3. Gallery & Chat Images
+        const galleryItems = [];
+        const folders = await apiJson('api/images/folders', { method: 'POST', body: {}, signal }).catch(() => []);
+        if (Array.isArray(folders) && folders.length > 0) {
+            let doneFolders = 0;
+            await mapWithConcurrency(folders, 4, async (folder) => {
+                if (!folder) return;
+                try {
+                    const files = await apiJson('api/images/list', {
+                        method: 'POST',
+                        body: { folder, type: 7 },
+                        signal,
+                    });
+                    if (Array.isArray(files)) {
+                        for (const file of files) {
+                            const fName = typeof file === 'string' ? file : file?.fileName || file?.name;
+                            if (!fName) continue;
+                            const relPath = `user/images/${folder}/${fName}`;
+                            galleryItems.push(registerItem({
+                                key: `gallery:${relPath}`,
+                                categoryId: 'media',
+                                subgroupId: 'gallery_images',
+                                title: `${folder} / ${fName}`,
+                                subtitle: `Thư mục ảnh: ${folder} · Đường dẫn: ${relPath}`,
+                                sizeBytes: 0,
+                                isActive: false,
+                                facets: ['src:user', `folder:${folder}`],
+                                badges: [{ text: `📁 ${folder}`, type: 'muted' }],
+                                payload: {
+                                    kind: 'gallery_image',
+                                    folder,
+                                    fileName: fName,
+                                    path: relPath,
+                                },
+                            }));
+                        }
+                    }
+                } catch {
+                    // Skip unreadable image subfolder
+                }
+                doneFolders++;
+                onProgress?.(`Đang quét thư mục ảnh thư viện (${doneFolders}/${folders.length})...`);
+            }, signal);
+        }
+
+        // 4. Built-in User Audio Assets (`POST api/assets/get` -> bgm / ambient / blip)
+        const assetItems = [];
+        const assetsMap = await apiJson('api/assets/get', {
+            method: 'POST',
+            body: {},
+            signal,
+            allow404: true,
+        }).catch(() => ({}));
+        if (assetsMap && typeof assetsMap === 'object' && !assetsMap.__notFound) {
+            const assetCats = [
+                { key: 'bgm', label: 'Nhạc nền BGM' },
+                { key: 'ambient', label: 'Âm thanh môi trường Ambient' },
+                { key: 'blip', label: 'Âm thanh hội thoại Blip' },
+            ];
+            for (const ac of assetCats) {
+                const list = assetsMap[ac.key];
+                if (!Array.isArray(list)) continue;
+                for (const rel of list) {
+                    const fileName = String(rel || '').replace(/\\/g, '/').split('/').pop() || '';
+                    if (!fileName || fileName === '.placeholder') continue;
+                    assetItems.push(registerItem({
+                        key: `asset:${ac.key}::${fileName}`,
+                        categoryId: 'media',
+                        subgroupId: 'user_assets',
+                        title: fileName,
+                        subtitle: `${ac.label} · Đường dẫn: assets/${ac.key}/${fileName}`,
+                        sizeBytes: 0,
+                        isActive: false,
+                        facets: ['src:user'],
+                        badges: [{ text: ac.key.toUpperCase(), type: 'muted' }],
+                        payload: {
+                            kind: 'user_asset',
+                            category: ac.key,
+                            filename: fileName,
+                        },
+                    }));
+                }
+            }
+        }
+
+        // 5. Custom ComfyUI Workflows (`POST api/sd/comfy/workflows`)
+        const workflowItems = [];
+        const workflows = await apiJson('api/sd/comfy/workflows', {
+            method: 'POST',
+            body: {},
+            signal,
+            allow404: true,
+        }).catch(() => []);
+        if (Array.isArray(workflows)) {
+            const activeWorkflow = String(extSettings?.sd?.comfy_workflow || '');
+            for (const wf of workflows) {
+                const fileName = String(wf || '').trim();
+                if (!fileName || BUILTIN_COMFY_WORKFLOWS.has(fileName)) continue;
+                const isActive = fileName === activeWorkflow;
+                workflowItems.push(registerItem({
+                    key: `workflow:${fileName}`,
+                    categoryId: 'media',
+                    subgroupId: 'comfy_workflows',
+                    title: stripExt(fileName, '.json'),
+                    subtitle: `Workflow ComfyUI · Tệp: user/workflows/${fileName}`,
+                    sizeBytes: 0,
+                    isActive,
+                    facets: ['src:user'],
+                    badges: [
+                        ...(isActive ? [{ text: 'Đang dùng', type: 'active' }] : []),
+                        { text: 'ComfyUI', type: 'muted' },
+                    ],
+                    payload: {
+                        kind: 'comfy_workflow',
+                        fileName,
+                    },
+                }));
+            }
+        }
+
+        // 6. Character Tags
+        const tags = Array.isArray(ctx?.tags) ? ctx.tags : [];
+        const tagMap = ctx?.tagMap || ctx?.tag_map || {};
+        const tagRefCounts = new Map();
+        for (const list of Object.values(tagMap)) {
+            if (!Array.isArray(list)) continue;
+            for (const tid of list) {
+                tagRefCounts.set(tid, (tagRefCounts.get(tid) || 0) + 1);
+            }
+        }
+        const tagItems = [];
+        for (const tag of tags) {
+            if (!tag?.id) continue;
+            const refs = tagRefCounts.get(tag.id) || 0;
+            tagItems.push(registerItem({
+                key: `tag:${tag.id}`,
+                categoryId: 'media',
+                subgroupId: 'tags',
+                title: String(tag.name || tag.id),
+                subtitle: `Chỉ gỡ định nghĩa và liên kết tag (tuyệt đối không xóa ${refs} thẻ nhân vật thuộc tag này)`,
+                sizeBytes: 0,
+                sortMetric: refs,
+                isActive: false,
+                facets: ['src:user', refs === 0 ? 'tag_state:empty' : 'tag_state:used'],
+                badges: [{ text: refs > 0 ? `Gắn ${refs} NV` : 'Trống không NV', type: refs > 0 ? 'info' : 'muted' }],
+                payload: {
+                    kind: 'tag',
+                    id: tag.id,
+                    name: String(tag.name || tag.id),
+                },
+            }));
+        }
+
+        return [
+            { id: 'quick_replies', label: 'Bộ Quick Reply', items: qrItems },
+            { id: 'databank', label: 'Tệp đính kèm Data Bank', items: databankItems },
+            { id: 'gallery_images', label: 'Thư viện ảnh & Ảnh chat', items: galleryItems },
+            { id: 'user_assets', label: 'Tài nguyên âm thanh & Môi trường', items: assetItems },
+            { id: 'comfy_workflows', label: 'Workflow tạo ảnh ComfyUI', items: workflowItems },
+            { id: 'tags', label: 'Thẻ tag nhân vật', items: tagItems },
+        ];
+    }
+
+    async function scanExtensionsCategory(signal, onProgress) {
+        const ctx = getContext();
+        const extSettings = ctx?.extensionSettings || ctx?.extension_settings || {};
+        const settingsData = await getSettingsSnapshot(signal);
+        const isAdmin = checkIsAdmin(ctx, settingsData);
+        const warnings = [];
+
+        // 1. Third-party extensions (`api/extensions/discover`)
+        const extItems = [];
+        const discovered = await apiJson('api/extensions/discover', { method: 'GET', signal }).catch(() => []);
+        const disabledExtensions = new Set(Array.isArray(extSettings.disabledExtensions) ? extSettings.disabledExtensions : []);
+        if (Array.isArray(discovered)) {
+            for (const ext of discovered) {
+                if (!ext?.name || ext.type === 'system') continue;
+                const rawName = String(ext.name);
+                const strippedName = rawName.replace(/^third-party\//i, '');
+                if (!strippedName || excludedExtNames.has(strippedName.toLowerCase())) {
+                    continue; // Strictly never list ST-Cleaner / self
+                }
+                const isGlobal = ext.type === 'global';
+                if (isGlobal && !isAdmin) {
+                    continue; // Non-admin cannot delete global extensions
+                }
+                const isDisabled = disabledExtensions.has(rawName) || disabledExtensions.has(`third-party/${strippedName}`);
+                const coreEcoLabel = matchCoreEcosystemExt(strippedName);
+                const isCritical = Boolean(coreEcoLabel);
+                const criticalReason = coreEcoLabel
+                    ? `${coreEcoLabel} (rất nhiều thanh trạng thái giao diện, script và biến prompt của thẻ nhân vật phụ thuộc chặt vào tiện ích này; gỡ cài đặt sẽ khiến hàng loạt thẻ bị lỗi)`
+                    : '';
+
+                const extFacets = [isDisabled ? 'ext:disabled' : 'ext:enabled'];
+                if (isCritical) extFacets.push('crit:essential');
+
+                extItems.push(registerItem({
+                    key: `ext:${isGlobal ? 'global' : 'local'}::${strippedName}`,
+                    categoryId: 'extensions',
+                    subgroupId: 'third_party_ext',
+                    title: strippedName,
+                    subtitle: `${isGlobal ? 'Tiện ích bên thứ ba toàn cục (global)' : 'Tiện ích bên thứ ba tài khoản hiện tại (local)'} · ${isDisabled ? 'Đã tắt' : 'Đang bật'}${coreEcoLabel ? ` · ⚠️ ${coreEcoLabel}` : ''}`,
+                    sizeBytes: 0,
+                    isActive: !isDisabled,
+                    isCritical,
+                    criticalReason,
+                    facets: extFacets,
+                    badges: [
+                        ...(!isDisabled ? [{ text: 'Đang dùng', type: 'active' }] : [{ text: 'Đã tắt', type: 'muted' }]),
+                        ...(isCritical ? [{ text: '⚠️ Nền tảng cốt lõi', type: 'critical' }] : []),
+                        { text: isGlobal ? 'Toàn cục' : 'Cục bộ', type: isGlobal ? 'warn' : 'info' },
+                    ],
+                    payload: {
+                        kind: 'third_party_ext',
+                        extensionName: strippedName,
+                        rawName,
+                        global: isGlobal,
+                    },
+                }));
+            }
+        }
+
+        // 2. Vector Collections (`api/vector/list` -> `api/vector/purge`)
+        const vectorItems = [];
+        const hashFn = typeof ctx?.getStringHash === 'function' ? ctx.getStringHash : computeStringHash;
+        const vectorSource = extSettings?.vectors?.source || 'transformers';
+        /** @type {{ id: string, label: string }[]} */
+        const candidateCollections = [];
+        const seenCol = new Set();
+        const pushCol = (id, label) => {
+            const cid = String(id || '').trim();
+            if (!cid || seenCol.has(cid)) return;
+            seenCol.add(cid);
+            candidateCollections.push({ id: cid, label });
+        };
+
+        if (Array.isArray(extSettings?.attachments)) {
+            for (const a of extSettings.attachments) {
+                if (a?.url) pushCol(`file_${hashFn(a.url)}`, `Vector tệp đính kèm toàn cục: ${a.name || a.url}`);
+            }
+        }
+        if (extSettings?.character_attachments && typeof extSettings.character_attachments === 'object') {
+            for (const arr of Object.values(extSettings.character_attachments)) {
+                if (!Array.isArray(arr)) continue;
+                for (const a of arr) {
+                    if (a?.url) pushCol(`file_${hashFn(a.url)}`, `Vector tệp đính kèm nhân vật: ${a.name || a.url}`);
+                }
+            }
+        }
+        const worldNames = Array.isArray(ctx?.worldNames) && ctx.worldNames.length > 0
+            ? ctx.worldNames
+            : (Array.isArray(settingsData?.world_names) ? settingsData.world_names : []);
+        for (const w of worldNames) {
+            if (w) pushCol(`world_${hashFn(w)}`, `Vector Cache Worldbook: ${w}`);
+        }
+        if (typeof ctx?.getCurrentChatId === 'function') {
+            const currentChatId = ctx.getCurrentChatId();
+            if (currentChatId) pushCol(String(currentChatId), `Vector Cache chat hiện tại: ${currentChatId}`);
+        }
+
+        await mapWithConcurrency(candidateCollections, 4, async (cand) => {
+            try {
+                const hashes = await apiJson('api/vector/list', {
+                    method: 'POST',
+                    body: { collectionId: cand.id, source: vectorSource },
+                    signal,
+                    allow404: true,
+                });
+                if (Array.isArray(hashes) && hashes.length > 0) {
+                    vectorItems.push(registerItem({
+                        key: `vector:${cand.id}`,
+                        categoryId: 'extensions',
+                        subgroupId: 'vectors',
+                        title: cand.label,
+                        subtitle: `ID tập hợp: ${cand.id} · Đã lưu đệm ${hashes.length} phân đoạn vector`,
+                        sizeBytes: 0,
+                        sortMetric: hashes.length,
+                        isActive: false,
+                        facets: ['ext:cache_orphan'],
+                        badges: [{ text: `${hashes.length} phân đoạn`, type: 'info' }],
+                        payload: {
+                            kind: 'vector_collection',
+                            collectionId: cand.id,
+                        },
+                    }));
+                }
+            } catch {
+                // Vector backend unconfigured or empty collection; skip silently
+            }
+        }, signal);
+
+        // 3. Chat Backups (`api/backups/chat/get`)
+        const backupItems = [];
+        const backupsRes = await apiJson('api/backups/chat/get', {
+            method: 'POST',
+            body: {},
+            signal,
+            allow404: true,
+        }).catch(() => []);
+        if (Array.isArray(backupsRes)) {
+            for (const b of backupsRes) {
+                const fileName = String(b?.file_name || '').trim();
+                if (!fileName) continue;
+                backupItems.push(registerItem({
+                    key: `backup:${fileName}`,
+                    categoryId: 'extensions',
+                    subgroupId: 'chat_backups',
+                title: fileName,
+                subtitle: `Bản sao lưu chat tự động${b.file_size ? ` · ${b.file_size}` : ''}${b.chat_items !== undefined ? ` · ${b.chat_items} tin nhắn` : ''}`,
+                sizeBytes: parseSizeStringBytes(b.file_size),
+                sortTimeMs: parseTavernTimestamp(b.last_mes, fileName),
+                sortMetric: (Number(b.chat_items) || 0) * 1024 + parseSizeStringBytes(b.file_size),
+                isActive: false,
+                    facets: ['ext:cache_orphan'],
+                    badges: [{ text: 'Bản sao lưu', type: 'muted' }],
+                    payload: {
+                        kind: 'chat_backup',
+                        name: fileName,
+                    },
+                }));
+            }
+        }
+
+        // 4. Data Maid Orphan Files (`api/data-maid/report`, ST 1.16+, graceful 404 fallback)
+        const maidItems = [];
+        onProgress?.('Đang quét tệp mồ côi dư thừa (Data Maid)...');
+        const maidRes = await apiJson('api/data-maid/report', {
+            method: 'POST',
+            body: {},
+            signal,
+            allow404: true,
+        }).catch(() => ({ __notFound: true }));
+
+        if (maidRes?.__notFound) {
+            dataMaidAvailable = false;
+            dataMaidToken = null;
+            warnings.push('Phiên bản SillyTavern hiện tại không hỗ trợ API quét tệp mồ côi Data Maid, đã tự động bỏ qua mục này.');
+        } else if (maidRes?.report && maidRes?.token) {
+            dataMaidAvailable = true;
+            dataMaidToken = String(maidRes.token);
+            const maidTypeLabels = {
+                images: 'Ảnh chat mồ côi',
+                files: 'Tệp đính kèm mồ côi',
+                chats: 'Tệp chat đơn mồ côi',
+                groupChats: 'Tệp chat nhóm mồ côi',
+                avatarThumbnails: 'Ảnh thu nhỏ nhân vật lỗi',
+                backgroundThumbnails: 'Ảnh thu nhỏ nền lỗi',
+                personaThumbnails: 'Ảnh thu nhỏ Persona lỗi',
+                chatBackups: 'Bản sao lưu chat hết hạn',
+                // Deliberately exclude settingsBackups so settings snapshots are never touched
+            };
+            for (const [typeKey, typeLabel] of Object.entries(maidTypeLabels)) {
+                const list = maidRes.report[typeKey];
+                if (!Array.isArray(list)) continue;
+                for (const entry of list) {
+                    if (!entry?.hash) continue;
+                    const displayPath = entry.parent ? `${entry.parent}/${entry.name}` : String(entry.name || entry.hash.slice(0, 8));
+                    maidItems.push(registerItem({
+                        key: `maid:${entry.hash}`,
+                        categoryId: 'extensions',
+                        subgroupId: 'data_maid',
+                        title: `${displayPath}`,
+                        subtitle: `${typeLabel}${entry.size ? ` · ${Math.round(Number(entry.size) / 1024)} KB` : ''}`,
+                        sizeBytes: Number(entry.size) || 0,
+                        isActive: false,
+                        facets: ['ext:cache_orphan'],
+                        badges: [{ text: typeLabel, type: 'warn' }],
+                        payload: {
+                            kind: 'data_maid',
+                            hash: entry.hash,
+                            name: displayPath,
+                        },
+                    }));
+                }
+            }
+        }
+
+        const groups = [
+            { id: 'third_party_ext', label: 'Tiện ích bên thứ ba', items: extItems },
+            { id: 'vectors', label: 'Tập hợp Vector Cache', items: vectorItems },
+            { id: 'chat_backups', label: 'Tệp sao lưu chat', items: backupItems },
+        ];
+        if (dataMaidAvailable !== false) {
+            groups.push({ id: 'data_maid', label: 'Tệp mồ côi dư thừa', items: maidItems });
+        }
+        return { groups, warnings };
+    }
+
+    /**
+     * Builds ordered, non-zero secondary classification facets (`{ id, label, count, tone }[]`)
+     * for the scanned category so users can filter by tags, binding scopes, user vs built-in, etc.
+     */
+    function buildCategoryFacets(categoryId, groups) {
+        const ctx = getContext();
+        const tags = Array.isArray(ctx?.tags) ? ctx.tags.filter(t => t && t.id !== undefined && t.id !== null) : [];
+        const facetCounts = new Map();
+        for (const g of groups) {
+            for (const item of g.items) {
+                if (!Array.isArray(item.facets)) continue;
+                for (const fid of item.facets) {
+                    facetCounts.set(fid, (facetCounts.get(fid) || 0) + 1);
+                }
+            }
+        }
+
+        /** @type {Array<{ id: string, label: string, count: number, tone?: string }>} */
+        const out = [];
+        const pushIfAny = (id, label, tone = 'default') => {
+            const count = facetCounts.get(id) || 0;
+            if (count > 0) {
+                out.push({ id, label, count, tone });
+            }
+        };
+        const pushDynamicTags = () => {
+            const tagEntries = [];
+            for (const t of tags) {
+                const fid = `tag:${t.id}`;
+                const c = facetCounts.get(fid) || 0;
+                if (c > 0) {
+                    tagEntries.push({ id: fid, label: `#${t.name || t.id}`, count: c, tone: 'tag' });
+                }
+            }
+            tagEntries.sort((a, b) => b.count - a.count);
+            out.push(...tagEntries);
+        };
+
+        switch (categoryId) {
+            case 'characters':
+                pushIfAny('char:idle', 'Nhàn rỗi/Không nhóm/Chưa thích', 'safe');
+                pushIfAny('char:fav', '★ Yêu thích', 'warn');
+                pushIfAny('char:ingroup', 'Thành viên nhóm chat');
+                pushIfAny('src:builtin', 'Nhân vật mặc định ST');
+                pushDynamicTags();
+                pushIfAny('tag:__untagged__', 'Chưa gắn tag');
+                break;
+
+            case 'worldinfo':
+                pushIfAny('wi:unbound', 'Nhàn rỗi chưa gắn', 'safe');
+                pushIfAny('wi:global', 'Bật toàn cục thường trực', 'warn');
+                pushIfAny('wi:char_primary', 'Worldbook chính nhân vật');
+                pushIfAny('wi:char_extra', 'Worldbook phụ trợ nhân vật');
+                pushIfAny('wi:persona_chat', 'Gắn Persona/Phiên chat');
+                pushIfAny('wi:embedded', 'Nhúng trong thẻ nhân vật');
+                pushIfAny('src:user', 'Người dùng tự tạo');
+                pushIfAny('src:builtin', 'Mặc định ST');
+                pushDynamicTags();
+                break;
+
+            case 'chats':
+                pushIfAny('chat:branch', 'Nhánh lịch sử cũ', 'safe');
+                pushIfAny('chat:short_test', 'Bản thử cực ngắn (≤2 tin)', 'safe');
+                pushIfAny('chat:current_default', 'Phiên chính của từng nhân vật', 'warn');
+                pushDynamicTags();
+                break;
+
+            case 'regex':
+                pushIfAny('rx:disabled', 'Đã tắt / Nhàn rỗi', 'safe');
+                pushIfAny('rx:enabled', 'Đang bật', 'warn');
+                pushIfAny('rx:st_regex', 'Regex gốc ST');
+                pushIfAny('rx:tavern_helper', 'Script TavernHelper');
+                pushIfAny('rx:folder', 'Script trong thư mục');
+                pushIfAny('rx:vars_combos', 'Biến & Tổ hợp bật/tắt');
+                break;
+
+            case 'presets':
+                pushIfAny('src:user', 'Preset tự tạo', 'safe');
+                pushIfAny('src:builtin', 'Mặc định của ST');
+                pushIfAny('crit:essential', '⚠️ Nền tảng dự phòng cốt lõi', 'critical');
+                break;
+
+            case 'profiles': {
+                for (const [fid, count] of facetCounts.entries()) {
+                    if (fid.startsWith('api:') && count > 0) {
+                        out.push({ id: fid, label: `API: ${fid.slice(4)}`, count, tone: 'default' });
+                    }
+                }
+                break;
+            }
+
+            case 'personas':
+                pushIfAny('src:user', 'Tự tạo / Tải lên', 'safe');
+                pushIfAny('src:builtin', 'Mặc định của ST');
+                pushIfAny('bg:animated', 'Hình nền động');
+                pushIfAny('crit:essential', '⚠️ Nền tảng dự phòng cốt lõi', 'critical');
+                break;
+
+            case 'media': {
+                pushIfAny('src:user', 'Tài nguyên người dùng', 'safe');
+                pushIfAny('tag_state:empty', 'Tag trống không có nhân vật', 'safe');
+                pushIfAny('crit:essential', '⚠️ Nền tảng dự phòng cốt lõi', 'critical');
+                const folderEntries = [];
+                for (const [fid, count] of facetCounts.entries()) {
+                    if (fid.startsWith('folder:') && count > 0) {
+                        folderEntries.push({ id: fid, label: `📁 ${fid.slice(7)}`, count, tone: 'tag' });
+                    }
+                }
+                folderEntries.sort((a, b) => b.count - a.count);
+                out.push(...folderEntries);
+                break;
+            }
+
+            case 'extensions':
+                pushIfAny('ext:disabled', 'Tiện ích đã tắt', 'safe');
+                pushIfAny('ext:cache_orphan', 'Cache / Sao lưu / Tệp mồ côi', 'safe');
+                pushIfAny('ext:enabled', 'Tiện ích đang bật', 'warn');
+                pushIfAny('crit:essential', '⚠️ Nền tảng hệ sinh thái cốt lõi', 'critical');
+                break;
+
+            default:
+                break;
+        }
+
+        return out;
+    }
+
+    function buildCategoryRecord(categoryId, groups, warnings = []) {
+        let totalCount = 0;
+        let activeCount = 0;
+        let criticalCount = 0;
+        for (const g of groups) {
+            totalCount += g.items.length;
+            for (const item of g.items) {
+                if (item.isActive) activeCount++;
+                if (item.isCritical) criticalCount++;
+            }
+        }
+        const facets = buildCategoryFacets(categoryId, groups);
+        return {
+            categoryId,
+            groups,
+            facets,
+            totalCount,
+            activeCount,
+            criticalCount,
+            warnings,
+            scannedAt: Date.now(),
+        };
+    }
+
+    /**
+     * Scans a single top-level category (or returns cached result unless `force` is true).
+     * @param {string} categoryId
+     * @param {{ force?: boolean, signal?: AbortSignal, onProgress?: (msg: string) => void, onPartial?: (partialRecord: any) => void }} [opts]
+     */
+    async function scanCategory(categoryId, opts = {}) {
+        const { force = false, signal, onProgress, onPartial } = opts;
+        if (!force && categoryCache.has(categoryId)) {
+            return categoryCache.get(categoryId);
+        }
+
+        unregisterCategoryKeys(categoryId);
+        overviewSummaryCache = null;
+        const emitPartial = typeof onPartial === 'function'
+            ? (partialGroups) => {
+                if (!signal?.aborted) {
+                    onPartial(buildCategoryRecord(categoryId, partialGroups, []));
+                }
+            }
+            : null;
+
+        let rawResult;
+        switch (categoryId) {
+            case 'characters':
+                rawResult = await scanCharactersCategory(signal, onProgress, emitPartial);
+                break;
+            case 'chats':
+                rawResult = await scanChatsCategory(signal, onProgress, emitPartial);
+                break;
+            case 'regex':
+                rawResult = await scanRegexCategory(signal, onProgress);
+                break;
+            case 'worldinfo':
+                rawResult = await scanWorldInfoCategory(signal, onProgress);
+                break;
+            case 'presets':
+                rawResult = await scanPresetsCategory(signal);
+                break;
+            case 'profiles':
+                rawResult = await scanProfilesCategory();
+                break;
+            case 'personas':
+                rawResult = await scanPersonasCategory(signal);
+                break;
+            case 'media':
+                rawResult = await scanMediaCategory(signal, onProgress);
+                break;
+            case 'extensions':
+                rawResult = await scanExtensionsCategory(signal, onProgress);
+                break;
+            default:
+                throw new Error(`Unknown category: ${categoryId}`);
+        }
+
+        if (signal?.aborted) {
+            unregisterCategoryKeys(categoryId);
+            overviewSummaryCache = null;
+            throw new DOMException('Scan aborted', 'AbortError');
+        }
+
+        const groups = Array.isArray(rawResult) ? rawResult : rawResult.groups;
+        const warnings = Array.isArray(rawResult) ? [] : (rawResult.warnings || []);
+        const record = buildCategoryRecord(categoryId, groups, warnings);
+        categoryCache.set(categoryId, record);
+        overviewSummaryCache = null;
+        return record;
+    }
+
+    /**
+     * Warms `api/settings/get` in background when modal opens so Bento tile counts
+     * for worldinfo/presets/themes/quick-replies populate immediately without scanning chats.
+     */
+    async function warmOverviewMetadata(signal) {
+        await getSettingsSnapshot(signal);
+        return getOverviewSummary();
+    }
+
+    function invalidateCategories(categoryIds) {
+        for (const cid of categoryIds) {
+            categoryCache.delete(cid);
+            unregisterCategoryKeys(cid);
+        }
+        settingsSnapshot = null;
+        overviewSummaryCache = null;
+    }
+
+    function dispose() {
+        whitelistMap.clear();
+        categoryCache.clear();
+        settingsSnapshot = null;
+        settingsPromise = null;
+        overviewSummaryCache = null;
+        dataMaidToken = null;
+    }
+
+    /**
+     * Runs an on-demand multi-category deep diagnostic scan without blocking UI responsiveness.
+     * @param {{ signal?: AbortSignal, onProgress?: (msg: string) => void, onCategoryDone?: (categoryId: string) => void }} [opts]
+     */
+    async function runDeepHealthScan(opts = {}) {
+        const { signal, onProgress, onCategoryDone } = opts;
+        const targetCats = ['characters', 'worldinfo', 'regex', 'chats', 'media', 'extensions'];
+        for (let i = 0; i < targetCats.length; i++) {
+            if (signal?.aborted) throw new DOMException('Scan aborted', 'AbortError');
+            const cid = targetCats[i];
+            const def = CATEGORY_DEFS.find(c => c.id === cid);
+            onProgress?.(`Đang kiểm tra chuyên sâu (${i + 1}/${targetCats.length}): ${def?.label || cid}...`);
+            await scanCategory(cid, { force: false, signal, onProgress });
+            onCategoryDone?.(cid);
+        }
+        return categoryCache;
+    }
+
+    return {
+        whitelistMap,
+        getOverviewSummary,
+        warmOverviewMetadata,
+        scanCategory,
+        runDeepHealthScan,
+        getCachedCategory: (cid) => categoryCache.get(cid) || null,
+        getAllCachedCategories: () => categoryCache,
+        invalidateCategories,
+        getDataMaidToken: () => dataMaidToken,
+        getSettingsSnapshot,
+        dispose,
+    };
+}
